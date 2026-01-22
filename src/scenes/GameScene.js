@@ -38,6 +38,13 @@ export default class GameScene extends Phaser.Scene {
         this.load.image('shop_bg', '/assets/shop.png');
         this.load.image('feather', '/assets/feather.png');
         this.load.image('sword_stone', '/assets/sword_stone.png');
+        this.load.image('goal_pole', '/assets/goal_pole.png');
+        
+        // Boss Animations (Placeholder setup)
+        for (let i = 0; i < 6; i++) {
+            this.load.image(`boss_walk_${i}`, `/assets/mushroom/animations/walk/west/frame_00${i}.png`);
+        }
+
         // Load tileset as a spritesheet for the platforms
         this.load.spritesheet('tileset', '/assets/tileset.png', { frameWidth: 32, frameHeight: 32 });
 
@@ -184,16 +191,25 @@ export default class GameScene extends Phaser.Scene {
         this.springs = this.physics.add.staticGroup();
         this.breakableBlocks = this.physics.add.staticGroup();
         this.shops = this.physics.add.staticGroup();
+        this.bosses = this.physics.add.group();
+        this.goal = this.physics.add.staticGroup();
 
         this.generateWorld();
+
+        // Goal logic
+        this.physics.add.overlap(this.player, this.goal, this.winGame, null, this);
+        this.physics.add.collider(this.bosses, this.platforms);
+        this.physics.add.overlap(this.player, this.bosses, this.hitEnemy, null, this);
+        this.physics.add.overlap(this.fireballs, this.bosses, this.hitBoss, null, this);
 
         // Use the new Roark Hero idle frame
         this.player = this.physics.add.sprite(100, 400, 'roark_idle_0');
         this.player.setCollideWorldBounds(true);
+        this.player.setScale(2);
         
-        // Physics body sized and offset to the character
-        this.player.setBodySize(32, 40);
-        this.player.setOffset(8, 8); 
+        // Adjust physics body for scaled sprite
+        this.player.setBodySize(24, 32);
+        this.player.setOffset(12, 12); 
         
         this.player.state = 'SMALL';
         this.player.isInvulnerable = false;
@@ -280,8 +296,8 @@ export default class GameScene extends Phaser.Scene {
         this.anims.create({
             key: 'roark_run',
             frames: [
-                { key: 'roark_walk_0' }, { key: 'roark_walk_1' }, { key: 'roark_walk_2' },
-                { key: 'roark_walk_3' }, { key: 'roark_walk_4' }, { key: 'roark_walk_5' }
+                { key: 'roark_walk_5' }, { key: 'roark_walk_4' }, { key: 'roark_walk_3' },
+                { key: 'roark_walk_2' }, { key: 'roark_walk_1' }, { key: 'roark_walk_0' }
             ],
             frameRate: 10,
             repeat: -1
@@ -304,7 +320,7 @@ export default class GameScene extends Phaser.Scene {
         this.anims.create({
             key: 'roark_attack',
             frames: [
-                { key: 'roark_attack_0' }, { key: 'roark_attack_1' }, { key: 'roark_attack_2' }
+                { key: 'roark_attack_2' }, { key: 'roark_attack_1' }, { key: 'roark_attack_0' }
             ],
             frameRate: 15,
             repeat: 0
@@ -314,8 +330,8 @@ export default class GameScene extends Phaser.Scene {
         this.anims.create({
             key: 'mushroom_walk',
             frames: [
-                { key: 'mushroom_walk_0' }, { key: 'mushroom_walk_1' }, { key: 'mushroom_walk_2' },
-                { key: 'mushroom_walk_3' }, { key: 'mushroom_walk_4' }, { key: 'mushroom_walk_5' }
+                { key: 'mushroom_walk_5' }, { key: 'mushroom_walk_4' }, { key: 'mushroom_walk_3' },
+                { key: 'mushroom_walk_2' }, { key: 'mushroom_walk_1' }, { key: 'mushroom_walk_0' }
             ],
             frameRate: 8,
             repeat: -1
@@ -324,8 +340,8 @@ export default class GameScene extends Phaser.Scene {
         this.anims.create({
             key: 'frog_walk',
             frames: [
-                { key: 'frog_walk_0' }, { key: 'frog_walk_1' }, { key: 'frog_walk_2' },
-                { key: 'frog_walk_3' }, { key: 'frog_walk_4' }, { key: 'frog_walk_5' }
+                { key: 'frog_walk_5' }, { key: 'frog_walk_4' }, { key: 'frog_walk_3' },
+                { key: 'frog_walk_2' }, { key: 'frog_walk_1' }, { key: 'frog_walk_0' }
             ],
             frameRate: 8,
             repeat: -1
@@ -334,10 +350,20 @@ export default class GameScene extends Phaser.Scene {
         this.anims.create({
             key: 'turtle_walk',
             frames: [
-                { key: 'turtle_walk_0' }, { key: 'turtle_walk_1' }, { key: 'turtle_walk_2' },
-                { key: 'turtle_walk_3' }, { key: 'turtle_walk_4' }, { key: 'turtle_walk_5' }
+                { key: 'turtle_walk_5' }, { key: 'turtle_walk_4' }, { key: 'turtle_walk_3' },
+                { key: 'turtle_walk_2' }, { key: 'turtle_walk_1' }, { key: 'turtle_walk_0' }
             ],
             frameRate: 8,
+            repeat: -1
+        });
+
+        this.anims.create({
+            key: 'boss_walk',
+            frames: [
+                { key: 'boss_walk_5' }, { key: 'boss_walk_4' }, { key: 'boss_walk_3' },
+                { key: 'boss_walk_2' }, { key: 'boss_walk_1' }, { key: 'boss_walk_0' }
+            ],
+            frameRate: 6,
             repeat: -1
         });
     }
@@ -348,52 +374,56 @@ export default class GameScene extends Phaser.Scene {
             cloud.setScrollFactor(0.2);
             cloud.setDepth(-20);
         }
-        for (let i = 0; i < 100; i++) {
-            const m = this.add.image(i * 1000 + Math.random() * 500, 400, 'mountain');
-            m.setScrollFactor(0.5);
-            m.setDepth(-10);
-            m.setScale(1.5 + Math.random());
-        }
     }
 
     generateWorld() {
-        // Base ground
-        for (let i = 0; i < this.worldWidth / 32; i++) {
-            const ground = this.platforms.create(i * 32 + 16, 584, 'tileset', 1); // 584 is 600 - 16
-            ground.setOrigin(0.5);
-            ground.refreshBody();
-        }
+        // Base ground - using a standard green rectangle as foundation
+        const groundFoundation = this.add.rectangle(this.worldWidth/2, 584, this.worldWidth, 32, 0x27ae60);
+        this.physics.add.existing(groundFoundation, true);
+        this.platforms.add(groundFoundation);
+
+        // Biome groups for decorations
+        this.decorations = this.add.group();
 
         // Periodic features
         for (let x = 800; x < this.worldWidth; x += 400) {
             const rand = Math.random();
             
+            // Add biome-specific background decorations
+            this.addBiomeDecorations(x);
+
             // High platform clusters
             if (rand < 0.3) {
+                // ... (rest of platform logic)
                 const py = 200 + Math.random() * 200;
                 const width = Math.floor(2 + Math.random() * 5);
                 for (let j = 0; j < width; j++) {
                     const frame = j === 0 ? 0 : (j === width - 1 ? 2 : 1);
-                    const p = this.platforms.create(x + j * 32, py, 'tileset', frame);
-                    p.setOrigin(0.5);
+                    const p = this.platforms.create(x + j * 64, py, 'tileset', frame);
+                    p.setScale(2);
                     p.refreshBody();
 
                     // Add breakable blocks above some platforms
                     if (Math.random() > 0.8) {
-                        this.breakableBlocks.create(x + j * 32, py - 96, 'tileset', 3); // Frame 3 for block
+                        const b = this.breakableBlocks.create(x + j * 64, py - 128, 'tileset', 3);
+                        b.setScale(2);
+                        b.refreshBody();
                     }
                 }
                 
                 // Add spikes to some platforms
                 if (Math.random() > 0.7) {
-                    this.spikes.create(x + (width/2) * 32, py - 32, 'spikes');
+                    const s = this.spikes.create(x + (width/2) * 64, py - 64, 'spikes');
+                    s.setScale(2);
                 }
 
                 // Add gems or coins to platforms
                 if (Math.random() > 0.5) {
-                    this.gems.create(x + (width/2) * 32, py - 60, 'gem');
+                    const g = this.gems.create(x + (width/2) * 64, py - 100, 'gem');
+                    g.setScale(2);
                 } else {
-                    this.coins.create(x + (width/2) * 32, py - 60, 'coin');
+                    const c = this.coins.create(x + (width/2) * 64, py - 100, 'coin');
+                    c.setScale(2);
                 }
             }
 
@@ -429,6 +459,43 @@ export default class GameScene extends Phaser.Scene {
             }
             if (x % 5000 === 0) this.checkpoints.create(x, 500, 'flag');
         }
+
+        // Place Boss near the end
+        const bossX = this.worldWidth - 2000;
+        const boss = this.bosses.create(bossX, 400, 'boss_walk_0');
+        boss.setScale(4);
+        boss.health = 5;
+        boss.play('boss_walk');
+        boss.setCollideWorldBounds(true);
+        boss.setVelocityX(-50);
+
+        // Place Goal Pole at the absolute end
+        const goalX = this.worldWidth - 500;
+        const g = this.goal.create(goalX, 450, 'goal_pole');
+        g.setScale(2);
+        this.add.text(goalX - 100, 300, 'VICTORY', { fontSize: '32px', fill: '#f1c40f' }).setScrollFactor(1);
+    }
+
+    addBiomeDecorations(x) {
+        const rand = Math.random();
+        if (rand > 0.3) return;
+
+        let color = 0xffffff;
+        let scale = 1;
+        
+        if (x > 300000) { // Aquatic
+            color = 0x3498db;
+            const bubble = this.add.circle(x, 500 - Math.random() * 400, 5 + Math.random() * 10, color, 0.3);
+            this.decorations.add(bubble);
+        } else if (x > 150000) { // Fungal
+            color = 0x9b59b6;
+            const mushroom = this.add.circle(x, 550, 10 + Math.random() * 20, color, 0.6);
+            this.decorations.add(mushroom);
+        } else { // Meadows
+            color = 0x2ecc71;
+            const flower = this.add.circle(x, 560, 5 + Math.random() * 5, 0xe74c3c, 0.8);
+            this.decorations.add(flower);
+        }
     }
 
     spawnEnemyAt(x) {
@@ -438,29 +505,62 @@ export default class GameScene extends Phaser.Scene {
             m.setVelocityX(-100);
             m.setBounce(1, 0);
             m.setCollideWorldBounds(true);
+            m.setScale(2);
             m.play('mushroom_walk');
         } else if (r < 0.7) {
             const f = this.frogs.create(x, 500, 'frog_walk_0');
             f.nextJump = 0;
             f.setCollideWorldBounds(true);
+            f.setScale(2);
             f.play('frog_walk');
         } else {
             const t = this.turtles.create(x, 500, 'turtle_walk_0');
             t.setVelocityX(-50);
             t.setBounce(1, 0);
             t.setCollideWorldBounds(true);
+            t.setScale(2);
             t.play('turtle_walk');
         }
     }
 
     setupHUD() {
-        this.scoreText = this.add.text(16, 16, 'Score: 0', { fontSize: '24px', fill: '#fff' }).setScrollFactor(0);
-        this.livesText = this.add.text(16, 48, 'Lives: 3', { fontSize: '24px', fill: '#fff' }).setScrollFactor(0);
-        this.gemText = this.add.text(16, 80, 'Gems: 0', { fontSize: '24px', fill: '#00d2d3' }).setScrollFactor(0);
-        this.stateText = this.add.text(16, 112, 'State: SMALL', { fontSize: '18px', fill: '#fff' }).setScrollFactor(0);
+        const hudBg = this.add.rectangle(0, 0, 800, 60, 0x000000, 0.5)
+            .setOrigin(0)
+            .setScrollFactor(0)
+            .setDepth(1000);
+        
+        const style = { 
+            fontSize: '20px', 
+            fontFamily: 'monospace',
+            fill: '#fff' 
+        };
+
+        this.scoreText = this.add.text(20, 18, 'ROARK: 000000', style).setScrollFactor(0).setDepth(1001);
+        this.livesText = this.add.text(250, 18, '♥ x3', { ...style, fill: '#ff7675' }).setScrollFactor(0).setDepth(1001);
+        this.gemText = this.add.text(400, 18, '♦ x0', { ...style, fill: '#00d2d3' }).setScrollFactor(0).setDepth(1001);
+        this.stateText = this.add.text(550, 18, 'MODE: SMALL', style).setScrollFactor(0).setDepth(1001);
+        
+        // Timer
+        this.gameTime = 0;
+        this.timerText = this.add.text(700, 18, '00:00', style).setScrollFactor(0).setDepth(1001);
+    }
+
+    updateHUD() {
+        const scoreStr = this.score.toString().padStart(6, '0');
+        this.scoreText.setText(`ROARK: ${scoreStr}`);
+        this.livesText.setText(`♥ x${this.lives}`);
+        this.gemText.setText(`♦ x${this.gemCount}`);
+        this.stateText.setText(`MODE: ${this.player.state}`);
+        
+        const mins = Math.floor(this.gameTime / 60000).toString().padStart(2, '0');
+        const secs = Math.floor((this.gameTime % 60000) / 1000).toString().padStart(2, '0');
+        this.timerText.setText(`${mins}:${secs}`);
     }
 
     update(time, delta) {
+        this.gameTime += delta;
+        this.updateHUD();
+        // ... (rest of update)
         this.timeOfDay += delta / 120000;
         if (this.timeOfDay > 1) this.timeOfDay = 0;
         const alpha = Math.abs(Math.sin(this.timeOfDay * Math.PI)) * 0.6;
@@ -653,12 +753,28 @@ export default class GameScene extends Phaser.Scene {
             }
         });
 
+        // Boss logic
+        this.bosses.children.iterate(b => {
+            if (b.body.blocked.left) b.setVelocityX(50);
+            if (b.body.blocked.right) b.setVelocityX(-50);
+            
+            // Boss jump attack
+            if (time > (b.nextJump || 0) && b.body.touching.down) {
+                b.setVelocityY(-600);
+                b.nextJump = time + 3000 + Math.random() * 2000;
+            }
+        });
+
         // Shell interactions
         this.turtles.children.iterate(t => {
             if (t.isShell && t.isMoving) {
                 // Check if shell hits other enemies
                 this.physics.add.overlap(t, this.mushrooms, (shell, enemy) => enemy.destroy());
                 this.physics.add.overlap(t, this.frogs, (shell, enemy) => enemy.destroy());
+                this.physics.add.overlap(t, this.bosses, (shell, boss) => {
+                    this.hitBoss(null, boss);
+                    shell.setVelocityX(-shell.body.velocity.x);
+                });
                 this.physics.add.overlap(t, this.turtles, (shell, enemy) => {
                     if (enemy !== shell) enemy.destroy();
                 });
@@ -814,11 +930,49 @@ export default class GameScene extends Phaser.Scene {
         this.lives--;
         this.updateHUD();
         if (this.lives <= 0) {
-            this.scene.restart();
+            this.physics.pause();
+            this.add.text(400, 300, 'GAME OVER', { 
+                fontSize: '64px', 
+                fill: '#ff0000',
+                stroke: '#000',
+                strokeThickness: 6 
+            }).setOrigin(0.5).setScrollFactor(0);
+            this.time.delayedCall(3000, () => this.scene.restart());
         } else {
-            this.player.setPosition(this.player.lastCheckpoint.x, this.player.lastCheckpoint.y - 50);
+            // Respawn at checkpoint with invulnerability
+            this.player.setPosition(this.player.lastCheckpoint.x, this.player.lastCheckpoint.y - 100);
+            this.player.setVelocity(0, 0);
             this.becomeInvulnerable();
+            
+            // Pan camera back to player instantly
+            this.cameras.main.flash(500, 255, 0, 0);
         }
+    }
+
+    hitBoss(fireball, boss) {
+        fireball.destroy();
+        boss.health--;
+        boss.setTint(0xff0000);
+        this.time.delayedCall(100, () => boss.clearTint());
+        
+        if (boss.health <= 0) {
+            this.score += 5000;
+            boss.destroy();
+            this.updateHUD();
+        }
+    }
+
+    winGame(player, goal) {
+        this.physics.pause();
+        player.setTint(0x00ff00);
+        const winText = this.add.text(400, 300, 'YOU WIN!', { 
+            fontSize: '64px', 
+            fill: '#f1c40f',
+            stroke: '#000',
+            strokeThickness: 6 
+        }).setOrigin(0.5).setScrollFactor(0);
+        
+        this.time.delayedCall(3000, () => this.scene.restart());
     }
 
     updateHUD() {
