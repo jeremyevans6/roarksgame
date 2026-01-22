@@ -34,17 +34,50 @@ export default class GameScene extends Phaser.Scene {
         this.load.image('feather', '/assets/feather.png');
         this.load.image('sword_stone', '/assets/sword_stone.png');
         this.load.image('goal_pole', '/assets/goal_pole.png');
-        this.load.spritesheet('tileset', '/assets/tileset.png', { frameWidth: 32, frameHeight: 32 });
+        this.load.spritesheet('tileset_meadows', '/assets/tileset.png', { frameWidth: 32, frameHeight: 32 });
+        this.load.spritesheet('tileset_fungal', '/assets/tileset_fungal.png', { frameWidth: 32, frameHeight: 32 });
+        this.load.spritesheet('tileset_aquatic', '/assets/tileset_aquatic.png', { frameWidth: 32, frameHeight: 32 });
 
         // HUD & Background
         const graphics = this.make.graphics();
+        
+        // Generate Spikes
+        graphics.lineStyle(2, 0x636e72); graphics.fillStyle(0x2d3436);
+        graphics.beginPath(); graphics.moveTo(0, 32); graphics.lineTo(16, 0); graphics.lineTo(32, 32); graphics.closePath(); graphics.fillPath(); graphics.strokePath();
+        graphics.generateTexture('spikes', 32, 32); graphics.clear();
+
+        // Generate Flag
+        graphics.fillStyle(0x2ecc71); graphics.fillRect(0, 0, 32, 24);
+        graphics.fillStyle(0x7f8c8d); graphics.fillRect(0, 0, 4, 64);
+        graphics.generateTexture('flag', 32, 64); graphics.clear();
+
         graphics.fillStyle(0xffffff, 0.3); graphics.fillCircle(20, 20, 20); graphics.fillCircle(40, 20, 25); graphics.fillCircle(60, 20, 20);
         graphics.generateTexture('cloud', 80, 50); graphics.clear();
         graphics.fillStyle(0xe74c3c); graphics.fillCircle(8, 8, 8); graphics.generateTexture('fireball', 16, 16); graphics.clear();
     }
 
+    saveData() {
+        const data = {
+            score: this.score,
+            gemCount: this.gemCount,
+            upgrades: this.player.upgrades
+        };
+        localStorage.setItem('roark_save', JSON.stringify(data));
+    }
+
+    loadData() {
+        const saved = localStorage.getItem('roark_save');
+        if (saved) {
+            const data = JSON.parse(saved);
+            this.score = data.score || 0;
+            this.gemCount = data.gemCount || 0;
+            if (data.upgrades) this.player.upgrades = data.upgrades;
+            this.updateHUD();
+        }
+    }
+
     create() {
-        this.worldWidth = 48000;
+        this.worldWidth = 480000;
         this.physics.world.setBounds(0, 0, this.worldWidth, 600);
         this.cameras.main.setBounds(0, 0, this.worldWidth, 600);
 
@@ -79,8 +112,8 @@ export default class GameScene extends Phaser.Scene {
         this.player = this.physics.add.sprite(100, 400, 'roark_idle_0');
         this.player.setCollideWorldBounds(true);
         this.player.setScale(2);
-        this.player.setBodySize(20, 28); // Standard hit-box for hero
-        this.player.setOffset(14, 16); // Centered horizontally, aligned near bottom
+        this.player.setBodySize(24, 32); 
+        this.player.setOffset(12, 14); 
         this.player.state = 'SMALL';
         this.player.isInvulnerable = false;
         this.player.isSwimming = false;
@@ -91,7 +124,7 @@ export default class GameScene extends Phaser.Scene {
 
         this.generateWorld();
 
-        // Collisions
+        // Collisions & Overlaps
         this.physics.add.collider(this.player, this.platforms);
         this.physics.add.collider(this.player, this.movingPlatforms);
         this.physics.add.collider(this.player, this.breakableBlocks, this.hitBreakableBlock, null, this);
@@ -102,7 +135,6 @@ export default class GameScene extends Phaser.Scene {
         this.physics.add.collider(this.powerups, this.platforms);
         this.physics.add.collider(this.fireballs, this.platforms, (fb) => fb.destroy());
 
-        // Overlaps
         this.physics.add.overlap(this.player, this.spikes, this.hitSpikes, null, this);
         [this.mushrooms, this.frogs, this.turtles, this.birds, this.jellyfish, this.bosses].forEach(g => {
             this.physics.add.overlap(this.player, g, this.hitEnemy, null, this);
@@ -120,14 +152,10 @@ export default class GameScene extends Phaser.Scene {
             this.physics.add.overlap(this.fireballs, g, this.fireballHit, null, this);
         });
 
-        // Turtle Shell Overlap with Enemies
         this.physics.add.overlap(this.turtles, [this.mushrooms, this.frogs, this.turtles, this.birds, this.jellyfish, this.bosses], (shell, enemy) => {
             if (shell.isShell && shell.isMoving && shell !== enemy) {
                 if (enemy.health) this.hitBoss(null, enemy);
-                else {
-                    this.smokeEmitter.explode(10, enemy.x, enemy.y);
-                    enemy.destroy();
-                }
+                else { this.smokeEmitter.explode(10, enemy.x, enemy.y); enemy.destroy(); }
                 this.score += 200;
             }
         }, null, this);
@@ -137,11 +165,13 @@ export default class GameScene extends Phaser.Scene {
             up: Phaser.Input.Keyboard.KeyCodes.W, down: Phaser.Input.Keyboard.KeyCodes.S,
             left: Phaser.Input.Keyboard.KeyCodes.A, right: Phaser.Input.Keyboard.KeyCodes.D,
             shift: Phaser.Input.Keyboard.KeyCodes.SHIFT, esc: Phaser.Input.Keyboard.KeyCodes.ESC,
-            attack: Phaser.Input.Keyboard.KeyCodes.Z, fire: Phaser.Input.Keyboard.KeyCodes.X
+            attack: Phaser.Input.Keyboard.KeyCodes.Z, fire: Phaser.Input.Keyboard.KeyCodes.X,
+            swap: Phaser.Input.Keyboard.KeyCodes.C
         });
 
         this.score = 0; this.lives = 3; this.gemCount = 0; this.gameTime = 0;
         this.setupHUD();
+        this.loadData();
     }
 
     createParallax() {
@@ -182,27 +212,34 @@ export default class GameScene extends Phaser.Scene {
     }
 
     generateWorld() {
-        // Base Foundation with actual tiles
+        // Base Foundation - Solid 3-layer ground for better visibility
         for (let i = 0; i < this.worldWidth / 64; i++) {
-            const g = this.platforms.create(i * 64 + 32, 584, 'tileset', 1);
-            g.setScale(2).refreshBody();
+            const x = i * 64 + 32;
+            const tilesetKey = x > 32000 ? 'tileset_aquatic' : (x > 16000 ? 'tileset_fungal' : 'tileset_meadows');
+            // Ground starts higher up to be clearly visible
+            for (let row = 0; row < 3; row++) {
+                const g = this.platforms.create(x, 500 + (row * 64), tilesetKey, row === 0 ? 1 : 4);
+                g.setScale(2).refreshBody();
+            }
         }
 
         for (let x = 800; x < this.worldWidth; x += 400) {
             const rand = Math.random();
+            const tilesetKey = x > 32000 ? 'tileset_aquatic' : (x > 16000 ? 'tileset_fungal' : 'tileset_meadows');
             this.addBiomeDecorations(x);
             if (rand < 0.3) {
                 const py = 200 + Math.random() * 200;
                 const width = Math.floor(2 + Math.random() * 5);
                 for (let j = 0; j < width; j++) {
                     const frame = j === 0 ? 0 : (j === width - 1 ? 2 : 1);
-                    const p = this.platforms.create(x + j * 64, py, 'tileset', frame);
+                    const p = this.platforms.create(x + j * 64, py, tilesetKey, frame);
                     p.setScale(2).refreshBody();
-                    if (Math.random() > 0.8) this.breakableBlocks.create(x + j * 64, py - 128, 'tileset', 3).setScale(2).refreshBody();
+                    if (Math.random() > 0.8) this.breakableBlocks.create(x + j * 64, py - 128, tilesetKey, 3).setScale(2).refreshBody();
                 }
+                // ... (rest of decoration and item spawning)
                 if (Math.random() > 0.7) this.spikes.create(x + (width/2) * 64, py - 64, 'spikes').setScale(2).refreshBody();
-                if (Math.random() > 0.5) this.gems.create(x + (width/2) * 64, py - 100, 'gem_icon').setScale(2);
-                else this.coins.create(x + (width/2) * 64, py - 100, 'coin').setScale(2);
+                if (Math.random() > 0.5) this.gems.create(x + (width/2) * 64, py - 100, 'gem_icon').setScale(1);
+                else this.coins.create(x + (width/2) * 64, py - 100, 'coin').setScale(1);
             }
             if (rand > 0.9 && rand < 0.95) this.springs.create(x, 550, 'spring').setScale(2).refreshBody();
             if (rand > 0.3 && rand < 0.4) {
@@ -219,19 +256,28 @@ export default class GameScene extends Phaser.Scene {
             if (x % 5000 === 0) this.checkpoints.create(x, 500, 'flag').setScale(2).refreshBody();
         }
         const boss = this.bosses.create(this.worldWidth - 2000, 400, 'boss_walk_0');
-        boss.setScale(4); boss.health = 5; boss.setBodySize(40, 40); boss.setOffset(44, 44);
+        boss.setScale(4); boss.health = 5; 
+        // Adjusted hit-box for 128x128 scaled by 4x
+        boss.setBodySize(60, 80); 
+        boss.setOffset(34, 48);
         boss.play('boss_walk'); boss.setCollideWorldBounds(true); boss.setVelocityX(-50);
         this.goal.create(this.worldWidth - 500, 450, 'goal_pole').setScale(2).refreshBody();
     }
 
     spawnEnemyAt(x) {
         const r = Math.random();
-        let key = (x > 300000) ? (r < 0.7 ? 'jellyfish' : 'bird') : (r < 0.3 ? 'mushroom' : (r < 0.5 ? 'frog' : (r < 0.7 ? 'turtle' : 'bird')));
-        const e = this[`${key}s`].create(x, (key === 'bird' || key === 'jellyfish') ? 200 + Math.random() * 200 : 500, `${key}_walk_0`);
+        let key = (x > 32000) ? (r < 0.7 ? 'jellyfish' : 'bird') : (r < 0.3 ? 'mushroom' : (r < 0.5 ? 'frog' : (r < 0.7 ? 'turtle' : 'bird')));
+        const groupKey = key === 'jellyfish' ? 'jellyfish' : `${key}s`;
+        const e = this[groupKey].create(x, (key === 'bird' || key === 'jellyfish') ? 200 + Math.random() * 200 : 500, `${key}_walk_0`);
         e.setScale(2);
         // Correct hit-boxes for enemies within 32x32 frames
-        e.setBodySize(20, 24); 
-        e.setOffset(6, 8);
+        if (key === 'jellyfish') {
+            e.setBodySize(16, 24);
+            e.setOffset(8, 4);
+        } else {
+            e.setBodySize(20, 24); 
+            e.setOffset(6, 8);
+        }
         
         if (key === 'bird' || key === 'jellyfish') { e.setVelocityX(key === 'jellyfish' ? -50 : -150); e.startY = e.y; }
         else { e.setVelocityX(-100).setBounce(1, 0).setCollideWorldBounds(true); }
@@ -252,8 +298,8 @@ export default class GameScene extends Phaser.Scene {
         if (this.player.isDashing) speed *= 3;
         this.player.setAlpha(this.player.isDashing ? 0.7 : (this.player.isInvulnerable ? 0.5 : 1));
 
-        if (this.cursors.left.isDown || this.wasd.left.isDown) { this.player.setVelocityX(-speed); this.player.setFlipX(true); this.player.setOffset(14, 16); }
-        else if (this.cursors.right.isDown || this.wasd.right.isDown) { this.player.setVelocityX(speed); this.player.setFlipX(false); this.player.setOffset(14, 16); }
+        if (this.cursors.left.isDown || this.wasd.left.isDown) { this.player.setVelocityX(-speed); this.player.setFlipX(true); this.player.setOffset(8, 4); }
+        else if (this.cursors.right.isDown || this.wasd.right.isDown) { this.player.setVelocityX(speed); this.player.setFlipX(false); this.player.setOffset(8, 4); }
         else this.player.setVelocityX(0);
 
         if (this.player.body.touching.down) this.jumpCount = 0;
@@ -270,14 +316,15 @@ export default class GameScene extends Phaser.Scene {
         // Attacks
         if (Phaser.Input.Keyboard.JustDown(this.wasd.attack)) this.attack();
         if (Phaser.Input.Keyboard.JustDown(this.wasd.fire) && this.player.state === 'FIRE') this.shootFireball();
+        if (Phaser.Input.Keyboard.JustDown(this.wasd.swap)) this.swapPowerup();
     }
 
     updateBiomeVisuals() {
         const x = this.player.x;
-        this.player.isSwimming = (x > 300000);
+        this.player.isSwimming = (x > this.worldWidth * 0.625); // 300,000 / 480,000
         this.physics.world.gravity.y = this.player.isSwimming ? 300 : 1200;
-        const tint = x > 300000 ? 0x3498db : (x > 150000 ? 0x9b59b6 : 0xffffff);
-        const bg = x > 300000 ? 0x2c3e50 : (x > 150000 ? 0x4b0082 : 0x87ceeb);
+        const tint = x > this.worldWidth * 0.625 ? 0x3498db : (x > this.worldWidth * 0.3125 ? 0x9b59b6 : 0xffffff);
+        const bg = x > this.worldWidth * 0.625 ? 0x2c3e50 : (x > this.worldWidth * 0.3125 ? 0x4b0082 : 0x87ceeb);
         if (Math.floor(x/1000) !== this.lastTintChunk) {
             this.lastTintChunk = Math.floor(x/1000);
             this.cameras.main.setBackgroundColor(bg);
@@ -302,6 +349,10 @@ export default class GameScene extends Phaser.Scene {
         this.gemText = this.add.text(400, 18, '♦ x0', { ...s, fill: '#00d2d3' }).setScrollFactor(0).setDepth(1001);
         this.stateText = this.add.text(550, 18, 'MODE: SMALL', s).setScrollFactor(0).setDepth(1001);
         this.timerText = this.add.text(700, 18, '00:00', s).setScrollFactor(0).setDepth(1001);
+
+        // Power-up Reserve
+        this.add.rectangle(400, 100, 50, 50, 0x000000, 0.5).setScrollFactor(0).setDepth(1000);
+        this.reserveIcon = this.add.image(400, 100, 'roark_placeholder').setScrollFactor(0).setDepth(1001).setVisible(false);
 
         // Mini-Map
         const mmWidth = 200;
@@ -339,7 +390,15 @@ export default class GameScene extends Phaser.Scene {
     collectCoin(p, c) { this.collectEmitter.explode(10, c.x, c.y); c.destroy(); this.score += 10; }
     hitBreakableBlock(p, b) { if (p.body.touching.up && this.player.state !== 'SMALL') { this.smokeEmitter.explode(20, b.x, b.y); b.destroy(); this.score += 20; this.cameras.main.shake(100, 0.01); } }
     collectGem(p, g) { this.collectEmitter.explode(15, g.x, g.y); g.destroy(); this.gemCount++; }
-    enterShop(p, s) { if (this.gemCount >= 10) { this.gemCount -= 10; if (Math.random() > 0.5) this.player.upgrades.jumpPower -= 50; else this.player.upgrades.speed += 50; this.tweens.add({ targets: s, scale: 2.2, duration: 100, yoyo: true }); } }
+    enterShop(p, s) { 
+        if (this.gemCount >= 10) { 
+            this.gemCount -= 10; 
+            if (Math.random() > 0.5) this.player.upgrades.jumpPower -= 50; 
+            else this.player.upgrades.speed += 50; 
+            this.tweens.add({ targets: s, scale: 2.2, duration: 100, yoyo: true }); 
+            this.saveData();
+        } 
+    }
     hitSpikes(p, s) { if (!this.player.isInvulnerable) this.player.state !== 'SMALL' ? this.shrinkPlayer() : this.die(); }
     attack() {
         this.player.isAttacking = true; const isStone = this.player.state === 'STONE'; this.time.delayedCall(isStone ? 200 : 300, () => this.player.isAttacking = false);
@@ -359,8 +418,34 @@ export default class GameScene extends Phaser.Scene {
         else this.player.state !== 'SMALL' ? this.shrinkPlayer() : this.die();
     }
     handleTurtleStomp(t) { if (!t.isShell) { t.isShell = true; t.isMoving = false; t.setVelocityX(0); t.setTint(0x95a5a6); t.body.setSize(32, 24); t.setOffset(0, 8); } else t.setVelocityX(0), t.isMoving = false; }
-    collectPowerup(p, pu) { const type = pu.texture.key; pu.destroy(); this.player.state = type === 'powerup_mushroom' ? 'SUPER' : (type === 'powerup_fire' ? 'FIRE' : (type === 'feather' ? 'FEATHER' : 'STONE')); this.player.body.setSize(type === 'powerup_mushroom' ? 40 : 32, type === 'powerup_mushroom' ? 50 : 40); }
-    reachCheckpoint(p, f) { if (this.player.lastCheckpoint.x !== f.x) { this.player.lastCheckpoint = { x: f.x, y: f.y }; f.setTint(0x00ff00); } }
+    collectPowerup(p, pu) { 
+        const type = pu.texture.key; pu.destroy(); 
+        
+        if (this.player.state !== 'SMALL') {
+            // Already powered up, put in reserve
+            this.reserveType = type;
+            this.reserveIcon.setTexture(type).setVisible(true).setScale(1.5);
+        } else {
+            this.applyPowerup(type);
+        }
+    }
+
+    applyPowerup(type) {
+        this.player.state = type === 'powerup_mushroom' ? 'SUPER' : (type === 'powerup_fire' ? 'FIRE' : (type === 'feather' ? 'FEATHER' : 'STONE')); 
+        this.player.body.setSize(type === 'powerup_mushroom' ? 40 : 32, type === 'powerup_mushroom' ? 50 : 40); 
+        this.updateHUD();
+    }
+
+    swapPowerup() {
+        if (!this.reserveType) return;
+        const currentType = this.player.state === 'SUPER' ? 'powerup_mushroom' : (this.player.state === 'FIRE' ? 'powerup_fire' : (this.player.state === 'FEATHER' ? 'feather' : 'sword_stone'));
+        const nextType = this.reserveType;
+        
+        this.applyPowerup(nextType);
+        this.reserveType = currentType;
+        this.reserveIcon.setTexture(currentType);
+    }
+    reachCheckpoint(p, f) { if (this.player.lastCheckpoint.x !== f.x) { this.player.lastCheckpoint = { x: f.x, y: f.y }; f.setTint(0x00ff00); this.saveData(); } }
     shrinkPlayer() { this.player.state = 'SMALL'; this.player.body.setSize(32, 40); this.becomeInvulnerable(); }
     becomeInvulnerable() { this.player.isInvulnerable = true; this.player.setAlpha(0.5); this.time.delayedCall(2000, () => { this.player.isInvulnerable = false; this.player.setAlpha(1); }); }
     die() {
@@ -369,5 +454,35 @@ export default class GameScene extends Phaser.Scene {
         else { this.player.setPosition(this.player.lastCheckpoint.x, this.player.lastCheckpoint.y - 100); this.player.setVelocity(0, 0); this.becomeInvulnerable(); this.cameras.main.flash(500, 255, 0, 0); }
     }
     hitBoss(fb, b) { b.health--; b.setTint(0xff0000); this.time.delayedCall(100, () => b.clearTint()); if (b.health <= 0) { this.score += 5000; this.cameras.main.shake(500, 0.05); b.destroy(); } }
-    winGame() { if (this.isWinning) return; this.isWinning = true; this.physics.pause(); this.add.text(400, 300, 'VICTORY!', { fontSize: '84px', fill: '#f1c40f' }).setOrigin(0.5).setScrollFactor(0); this.time.delayedCall(5000, () => { this.isWinning = false; this.scene.start('MenuScene'); }); }
+    winGame() { 
+        if (this.isWinning) return; 
+        this.isWinning = true; 
+        this.saveData(); // Save progress on victory
+        this.physics.pause(); 
+        const winText = this.add.text(400, 300, 'VICTORY!', { fontSize: '84px', fill: '#f1c40f' }).setOrigin(0.5).setScrollFactor(0); 
+        this.time.delayedCall(5000, () => { 
+            this.isWinning = false; 
+            this.scene.start('MenuScene'); 
+        }); 
+    }
+
+    saveData() {
+        const data = {
+            score: this.score,
+            gemCount: this.gemCount,
+            upgrades: this.player.upgrades
+        };
+        localStorage.setItem('roark_save', JSON.stringify(data));
+    }
+
+    loadData() {
+        const saved = localStorage.getItem('roark_save');
+        if (saved) {
+            const data = JSON.parse(saved);
+            this.score = data.score || 0;
+            this.gemCount = data.gemCount || 0;
+            if (data.upgrades) this.player.upgrades = data.upgrades;
+            this.updateHUD();
+        }
+    }
 }
