@@ -44,7 +44,7 @@ export default class GameScene extends Phaser.Scene {
     }
 
     create() {
-        this.worldWidth = 480000;
+        this.worldWidth = 48000;
         this.physics.world.setBounds(0, 0, this.worldWidth, 600);
         this.cameras.main.setBounds(0, 0, this.worldWidth, 600);
 
@@ -120,15 +120,49 @@ export default class GameScene extends Phaser.Scene {
             this.physics.add.overlap(this.fireballs, g, this.fireballHit, null, this);
         });
 
+        // Turtle Shell Overlap with Enemies
+        this.physics.add.overlap(this.turtles, [this.mushrooms, this.frogs, this.turtles, this.birds, this.jellyfish, this.bosses], (shell, enemy) => {
+            if (shell.isShell && shell.isMoving && shell !== enemy) {
+                if (enemy.health) this.hitBoss(null, enemy);
+                else {
+                    this.smokeEmitter.explode(10, enemy.x, enemy.y);
+                    enemy.destroy();
+                }
+                this.score += 200;
+            }
+        }, null, this);
+
         this.cursors = this.input.keyboard.createCursorKeys();
         this.wasd = this.input.keyboard.addKeys({
             up: Phaser.Input.Keyboard.KeyCodes.W, down: Phaser.Input.Keyboard.KeyCodes.S,
             left: Phaser.Input.Keyboard.KeyCodes.A, right: Phaser.Input.Keyboard.KeyCodes.D,
-            shift: Phaser.Input.Keyboard.KeyCodes.SHIFT, esc: Phaser.Input.Keyboard.KeyCodes.ESC
+            shift: Phaser.Input.Keyboard.KeyCodes.SHIFT, esc: Phaser.Input.Keyboard.KeyCodes.ESC,
+            attack: Phaser.Input.Keyboard.KeyCodes.Z, fire: Phaser.Input.Keyboard.KeyCodes.X
         });
 
         this.score = 0; this.lives = 3; this.gemCount = 0; this.gameTime = 0;
         this.setupHUD();
+    }
+
+    createParallax() {
+        // Sky Background
+        this.add.rectangle(0, 0, this.worldWidth, 600, 0x87ceeb).setOrigin(0).setScrollFactor(0);
+        
+        // Far Clouds
+        for (let i = 0; i < 50; i++) {
+            const x = Math.random() * this.worldWidth;
+            const y = 50 + Math.random() * 200;
+            const cloud = this.add.image(x, y, 'cloud');
+            cloud.setScrollFactor(0.2).setAlpha(0.4).setScale(2 + Math.random() * 2);
+        }
+
+        // Near Clouds
+        for (let i = 0; i < 30; i++) {
+            const x = Math.random() * this.worldWidth;
+            const y = 100 + Math.random() * 300;
+            const cloud = this.add.image(x, y, 'cloud');
+            cloud.setScrollFactor(0.5).setAlpha(0.7).setScale(1 + Math.random());
+        }
     }
 
     createAnimations() {
@@ -232,6 +266,10 @@ export default class GameScene extends Phaser.Scene {
         // Enemy AI & Shells
         this.updateEnemyAI(time);
         this.handleAnimations();
+
+        // Attacks
+        if (Phaser.Input.Keyboard.JustDown(this.wasd.attack)) this.attack();
+        if (Phaser.Input.Keyboard.JustDown(this.wasd.fire) && this.player.state === 'FIRE') this.shootFireball();
     }
 
     updateBiomeVisuals() {
@@ -253,7 +291,6 @@ export default class GameScene extends Phaser.Scene {
         this.birds.children.iterate(b => { b.y = b.startY + Math.sin(time / 200) * 50; });
         this.jellyfish.children.iterate(j => { j.y = j.startY + Math.sin(time / 500) * 30; });
         this.bosses.children.iterate(b => { if (b.body.blocked.left) b.setVelocityX(50); if (b.body.blocked.right) b.setVelocityX(-50); if (time > (b.nextJump || 0) && b.body.touching.down) { b.setVelocityY(-600); b.nextJump = time + 3000 + Math.random() * 2000; } });
-        this.turtles.children.iterate(t => { if (t.isShell && t.isMoving) [this.mushrooms, this.frogs, this.bosses, this.turtles, this.birds, this.jellyfish].forEach(g => this.physics.add.overlap(t, g, (s, e) => { if (e !== s) e.health ? this.hitBoss(null, e) : e.destroy(); })); });
     }
 
     // Helper functions
@@ -265,7 +302,16 @@ export default class GameScene extends Phaser.Scene {
         this.gemText = this.add.text(400, 18, '♦ x0', { ...s, fill: '#00d2d3' }).setScrollFactor(0).setDepth(1001);
         this.stateText = this.add.text(550, 18, 'MODE: SMALL', s).setScrollFactor(0).setDepth(1001);
         this.timerText = this.add.text(700, 18, '00:00', s).setScrollFactor(0).setDepth(1001);
+
+        // Mini-Map
+        const mmWidth = 200;
+        const mmHeight = 10;
+        this.mmX = 300;
+        this.mmY = 50;
+        this.add.rectangle(this.mmX, this.mmY, mmWidth, mmHeight, 0xffffff, 0.2).setOrigin(0, 0.5).setScrollFactor(0).setDepth(1000);
+        this.mmPlayer = this.add.rectangle(this.mmX, this.mmY, 4, 12, 0xf1c40f).setOrigin(0.5).setScrollFactor(0).setDepth(1001);
     }
+
     updateHUD() {
         this.scoreText.setText(`ROARK: ${this.score.toString().padStart(6, '0')}`);
         this.livesText.setText(`♥ x${this.lives}`);
@@ -274,6 +320,10 @@ export default class GameScene extends Phaser.Scene {
         const mins = Math.floor(this.gameTime / 60000).toString().padStart(2, '0');
         const secs = Math.floor((this.gameTime % 60000) / 1000).toString().padStart(2, '0');
         this.timerText.setText(`${mins}:${secs}`);
+
+        // Update Mini-Map player position
+        const progress = this.player.x / this.worldWidth;
+        this.mmPlayer.x = this.mmX + (progress * 200);
     }
     createEmitters() {
         this.collectEmitter = this.add.particles(0, 0, 'gem_icon', { speed: { min: 50, max: 150 }, scale: { start: 0.5, end: 0 }, alpha: { start: 1, end: 0 }, lifespan: 500, emitting: false, blendMode: 'ADD' });
