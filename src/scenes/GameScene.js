@@ -446,11 +446,23 @@ export default class GameScene extends Phaser.Scene {
         const alpha = Math.abs(Math.sin(this.timeOfDay * Math.PI)) * 0.6;
         this.dayNightOverlay.setAlpha(alpha);
 
+        // Biome Color Logic
+        this.updateBiomeVisuals();
+
         if (Math.random() < 0.001) {
             this.weatherParticles.setFrequency(this.weatherParticles.frequency === -1 ? 10 : -1);
         }
 
         let currentSpeed = this.player.upgrades.speed;
+        
+        // Glide logic for Feather state
+        if (this.player.state === 'FEATHER' && !this.player.body.touching.down && 
+            (this.cursors.up.isDown || this.wasd.up.isDown || this.cursors.space.isDown)) {
+            if (this.player.body.velocity.y > 0) {
+                this.player.setVelocityY(50); // Slow fall
+            }
+        }
+
         if (Phaser.Input.Keyboard.JustDown(this.wasd.shift) && time > this.player.dashTime) {
             this.player.isDashing = true;
             this.player.dashTime = time + 1000;
@@ -467,11 +479,11 @@ export default class GameScene extends Phaser.Scene {
         if (this.cursors.left.isDown || this.wasd.left.isDown) {
             this.player.setVelocityX(-currentSpeed);
             this.player.setFlipX(true);
-            this.player.setOffset(0, 32); // Adjust offset for flipped bottom-right sprite
+            this.player.setOffset(0, 32); 
         } else if (this.cursors.right.isDown || this.wasd.right.isDown) {
             this.player.setVelocityX(currentSpeed);
             this.player.setFlipX(false);
-            this.player.setOffset(80, 32); // Default bottom-right offset
+            this.player.setOffset(80, 32); 
         } else {
             this.player.setVelocityX(0);
         }
@@ -495,11 +507,47 @@ export default class GameScene extends Phaser.Scene {
             mp.setVelocityX(mp.speed * mp.direction);
         });
 
+        // Turtle Shell movement
+        this.turtles.children.iterate(t => {
+            if (t.isShell && t.isMoving) {
+                if (t.body.blocked.left || t.body.blocked.right) {
+                    t.setVelocityX(-t.body.velocity.x);
+                }
+            } else if (!t.isShell) {
+                if (t.body.blocked.left) t.setVelocityX(50);
+                if (t.body.blocked.right) t.setVelocityX(-50);
+            }
+        });
+
         if (Phaser.Input.Keyboard.JustDown(this.swordKey)) this.attack();
         if (Phaser.Input.Keyboard.JustDown(this.fireKey) && this.player.state === 'FIRE') this.shootFireball();
 
         this.updateEnemyAI(time);
         this.handleAnimations();
+    }
+
+    updateBiomeVisuals() {
+        const x = this.player.x;
+        let biome = 'Meadows';
+        let tint = 0xffffff;
+        let bgTint = 0x87ceeb; // Sky blue
+
+        if (x > 300000) {
+            biome = 'Aquatic';
+            tint = 0x3498db; // Deep blue
+            bgTint = 0x2c3e50;
+        } else if (x > 150000) {
+            biome = 'Fungal';
+            tint = 0x9b59b6; // Purple
+            bgTint = 0x4b0082;
+        }
+
+        // Apply tints periodically to save performance
+        if (Math.floor(x/1000) !== this.lastTintChunk) {
+            this.lastTintChunk = Math.floor(x/1000);
+            this.cameras.main.setBackgroundColor(bgTint);
+            this.platforms.setTint(tint);
+        }
     }
 
     handleAnimations() {
@@ -545,10 +593,13 @@ export default class GameScene extends Phaser.Scene {
     }
 
     updateEnemyAI(time) {
+        // Mushroom logic
         this.mushrooms.children.iterate(m => {
             if (m.body.blocked.left) m.setVelocityX(100);
             if (m.body.blocked.right) m.setVelocityX(-100);
         });
+
+        // Frog logic
         this.frogs.children.iterate(f => {
             if (time > f.nextJump && f.body.touching.down) {
                 f.setVelocityY(-400);
@@ -556,9 +607,17 @@ export default class GameScene extends Phaser.Scene {
                 f.nextJump = time + 1500 + Math.random() * 1000;
             }
         });
+
+        // Shell interactions
         this.turtles.children.iterate(t => {
-            if (t.body.blocked.left) t.setVelocityX(50);
-            if (t.body.blocked.right) t.setVelocityX(-50);
+            if (t.isShell && t.isMoving) {
+                // Check if shell hits other enemies
+                this.physics.add.overlap(t, this.mushrooms, (shell, enemy) => enemy.destroy());
+                this.physics.add.overlap(t, this.frogs, (shell, enemy) => enemy.destroy());
+                this.physics.add.overlap(t, this.turtles, (shell, enemy) => {
+                    if (enemy !== shell) enemy.destroy();
+                });
+            }
         });
     }
 
@@ -573,17 +632,29 @@ export default class GameScene extends Phaser.Scene {
 
     attack() {
         this.player.isAttacking = true;
-        this.time.delayedCall(300, () => this.player.isAttacking = false);
+        
+        const isStone = this.player.state === 'STONE';
+        const duration = isStone ? 200 : 300;
+        this.time.delayedCall(duration, () => this.player.isAttacking = false);
 
-        const attackRange = 60;
+        const attackRange = isStone ? 100 : 60;
         const xOffset = this.player.flipX ? -attackRange : attackRange;
-        const hitbox = this.add.rectangle(this.player.x + xOffset/2, this.player.y, attackRange, 40, 0xffff00, 0.3);
+        const hitbox = this.add.rectangle(
+            this.player.x + xOffset/2, 
+            this.player.y, 
+            attackRange, 
+            isStone ? 60 : 40, 
+            isStone ? 0x9b59b6 : 0xffff00, 
+            0.3
+        );
         this.physics.add.existing(hitbox);
+        
         const hit = (entity) => {
             this.score += 100;
             this.updateHUD();
             entity.destroy();
         };
+        
         this.physics.add.overlap(hitbox, this.mushrooms, (h, e) => hit(e));
         this.physics.add.overlap(hitbox, this.frogs, (h, e) => hit(e));
         this.physics.add.overlap(hitbox, this.turtles, (h, e) => hit(e));
@@ -606,8 +677,21 @@ export default class GameScene extends Phaser.Scene {
 
     hitEnemy(player, enemy) {
         if (this.player.isInvulnerable) return;
+
+        // Special case for turtle shells
+        if (enemy.isShell && !enemy.isMoving) {
+            enemy.setVelocityX(player.x < enemy.x ? 500 : -500);
+            enemy.isMoving = true;
+            this.becomeInvulnerable(); // Briefly invulnerable to avoid self-collision damage
+            return;
+        }
+
         if (player.body.touching.down && player.y < enemy.y - 10) {
-            enemy.destroy();
+            if (enemy.texture.key.includes('turtle')) {
+                this.handleTurtleStomp(enemy);
+            } else {
+                enemy.destroy();
+            }
             player.setVelocityY(-450);
             this.score += 50;
             this.updateHUD();
@@ -620,16 +704,38 @@ export default class GameScene extends Phaser.Scene {
         }
     }
 
+    handleTurtleStomp(turtle) {
+        if (!turtle.isShell) {
+            turtle.isShell = true;
+            turtle.isMoving = false;
+            turtle.setVelocityX(0);
+            turtle.setTint(0x95a5a6); // Shell grey
+            turtle.body.setSize(32, 24);
+            turtle.setOffset(0, 8);
+        } else if (turtle.isMoving) {
+            turtle.setVelocityX(0);
+            turtle.isMoving = false;
+        }
+    }
+
     collectPowerup(player, powerup) {
         const type = powerup.texture.key;
         powerup.destroy();
+        
+        // Reset to default size/offset
+        this.player.body.setSize(32, 40);
+        this.player.setOffset(this.player.flipX ? 0 : 8, 8);
+
         if (type === 'powerup_mushroom') {
             this.player.state = 'SUPER';
-            // Scale body slightly for Super state but keep 128x128 sheet
-            this.player.body.setSize(64, 110);
-            this.player.setOffset(this.player.flipX ? 0 : 64, 18);
+            this.player.body.setSize(40, 50);
+            this.player.setOffset(this.player.flipX ? 0 : 12, 4);
         } else if (type === 'powerup_fire') {
             this.player.state = 'FIRE';
+        } else if (type === 'feather') {
+            this.player.state = 'FEATHER';
+        } else if (type === 'sword_stone') {
+            this.player.state = 'STONE';
         }
         this.updateHUD();
     }
