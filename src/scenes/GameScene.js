@@ -10,6 +10,20 @@ export default class GameScene extends Phaser.Scene {
         this.load.spritesheet('roark', '/assets/roark.png', { frameWidth: 128, frameHeight: 128 });
         this.load.spritesheet('roark_running', '/assets/roarkRunning.png', { frameWidth: 128, frameHeight: 128 });
         
+        // Roark Hero (Individual frames based on PixelLab counts)
+        for (let i = 0; i < 4; i++) {
+            this.load.image(`roark_idle_${i}`, `/assets/roark/animations/breathing-idle/west/frame_00${i}.png`);
+        }
+        for (let i = 0; i < 6; i++) {
+            this.load.image(`roark_walk_${i}`, `/assets/roark/animations/walking/west/frame_00${i}.png`);
+        }
+        for (let i = 0; i < 9; i++) {
+            this.load.image(`roark_jump_${i}`, `/assets/roark/animations/jumping-1/west/frame_00${i}.png`);
+        }
+        for (let i = 0; i < 3; i++) {
+            this.load.image(`roark_attack_${i}`, `/assets/roark/animations/lead-jab/west/frame_00${i}.png`);
+        }
+
         // Enemy Animations (Individual frames)
         for (let i = 0; i < 6; i++) {
             const frame = i.toString().padStart(3, '0');
@@ -20,7 +34,10 @@ export default class GameScene extends Phaser.Scene {
 
         this.load.image('gem_icon', '/assets/gem.png');
         this.load.image('shop_bg', '/assets/shop.png');
-        this.load.image('tileset_img', '/assets/tileset.png');
+        this.load.image('feather', '/assets/feather.png');
+        this.load.image('sword_stone', '/assets/sword_stone.png');
+        // Load tileset as a spritesheet for the platforms
+        this.load.spritesheet('tileset', '/assets/tileset.png', { frameWidth: 32, frameHeight: 32 });
 
         const graphics = this.make.graphics();
         
@@ -165,13 +182,13 @@ export default class GameScene extends Phaser.Scene {
 
         this.generateWorld();
 
-        // Use the new 128x128 roark sprite
-        this.player = this.physics.add.sprite(100, 400, 'roark');
+        // Use the new Roark Hero idle frame
+        this.player = this.physics.add.sprite(100, 400, 'roark_idle_0');
         this.player.setCollideWorldBounds(true);
         
-        // Physics body sized and offset to the character in the bottom-right of the 128x128 square
-        this.player.setBodySize(48, 96);
-        this.player.setOffset(80, 32); 
+        // Physics body sized and offset to the character
+        this.player.setBodySize(32, 40);
+        this.player.setOffset(8, 8); 
         
         this.player.state = 'SMALL';
         this.player.isInvulnerable = false;
@@ -241,42 +258,49 @@ export default class GameScene extends Phaser.Scene {
     }
 
     createAnimations() {
-        if (this.textures.exists('roark')) {
-            this.anims.create({
-                key: 'roark_idle',
-                frames: [{ key: 'roark', frame: 1 }],
-                frameRate: 1,
-                repeat: -1
-            });
+        // Roark Hero Animations
+        this.anims.create({
+            key: 'roark_idle',
+            frames: [
+                { key: 'roark_idle_0' }, { key: 'roark_idle_1' }, 
+                { key: 'roark_idle_2' }, { key: 'roark_idle_3' }
+            ],
+            frameRate: 6,
+            repeat: -1
+        });
 
-            this.anims.create({
-                key: 'roark_run',
-                frames: this.anims.generateFrameNumbers('roark_running', { start: 4, end: 15 }),
-                frameRate: 12,
-                repeat: -1
-            });
+        this.anims.create({
+            key: 'roark_run',
+            frames: [
+                { key: 'roark_walk_0' }, { key: 'roark_walk_1' }, { key: 'roark_walk_2' },
+                { key: 'roark_walk_3' }, { key: 'roark_walk_4' }, { key: 'roark_walk_5' }
+            ],
+            frameRate: 10,
+            repeat: -1
+        });
 
-            this.anims.create({
-                key: 'roark_jump',
-                frames: [{ key: 'roark', frame: 8 }],
-                frameRate: 1,
-                repeat: 0
-            });
+        this.anims.create({
+            key: 'roark_jump',
+            frames: [{ key: 'roark_jump_4' }], // Use mid-jump frame
+            frameRate: 1,
+            repeat: 0
+        });
 
-            this.anims.create({
-                key: 'roark_fall',
-                frames: [{ key: 'roark', frame: 11 }],
-                frameRate: 1,
-                repeat: -1
-            });
+        this.anims.create({
+            key: 'roark_fall',
+            frames: [{ key: 'roark_jump_7' }], // Use falling frame
+            frameRate: 1,
+            repeat: -1
+        });
 
-            this.anims.create({
-                key: 'roark_attack',
-                frames: this.anims.generateFrameNumbers('roark', { start: 12, end: 14 }),
-                frameRate: 15,
-                repeat: 0
-            });
-        }
+        this.anims.create({
+            key: 'roark_attack',
+            frames: [
+                { key: 'roark_attack_0' }, { key: 'roark_attack_1' }, { key: 'roark_attack_2' }
+            ],
+            frameRate: 15,
+            repeat: 0
+        });
 
         // Enemy Walk Animations
         this.anims.create({
@@ -325,16 +349,37 @@ export default class GameScene extends Phaser.Scene {
     }
 
     generateWorld() {
-        for (let i = 0; i < this.worldWidth / 800; i++) {
-            this.platforms.create(i * 800 + 400, 568, 'floor');
+        // Base ground
+        for (let i = 0; i < this.worldWidth / 32; i++) {
+            const ground = this.platforms.create(i * 32 + 16, 584, 'tileset', 1); // 584 is 600 - 16
+            ground.setOrigin(0.5);
+            ground.refreshBody();
         }
+
+        // Periodic features
         for (let x = 800; x < this.worldWidth; x += 400) {
             const rand = Math.random();
+            
+            // High platform clusters
             if (rand < 0.3) {
                 const py = 200 + Math.random() * 200;
-                this.platforms.create(x, py, 'floor').setScale(0.2, 0.5).refreshBody();
-                if (Math.random() > 0.7) this.spikes.create(x, py - 32, 'spikes');
-                if (Math.random() > 0.5) this.gems.create(x, py - 60, 'gem');
+                const width = Math.floor(2 + Math.random() * 5);
+                for (let j = 0; j < width; j++) {
+                    const frame = j === 0 ? 0 : (j === width - 1 ? 2 : 1); // Left edge, mid, right edge
+                    const p = this.platforms.create(x + j * 32, py, 'tileset', frame);
+                    p.setOrigin(0.5);
+                    p.refreshBody();
+                }
+                
+                // Add spikes to some platforms
+                if (Math.random() > 0.7) {
+                    this.spikes.create(x + (width/2) * 32, py - 32, 'spikes');
+                }
+
+                // Add gems to platforms
+                if (Math.random() > 0.5) {
+                    this.gems.create(x + (width/2) * 32, py - 60, 'gem');
+                }
             }
             if (rand > 0.3 && rand < 0.4) {
                 const mp = this.movingPlatforms.create(x, 300, 'moving_platform');
@@ -352,8 +397,14 @@ export default class GameScene extends Phaser.Scene {
                 this.shops.create(x, 520, 'shop');
                 this.add.text(x - 20, 450, 'SHOP', { fontSize: '16px', fill: '#fff' });
             }
+            // Powerups
             if (rand > 0.95) {
-                const type = Math.random() > 0.5 ? 'powerup_mushroom' : 'powerup_fire';
+                const pRand = Math.random();
+                let type = 'powerup_mushroom';
+                if (pRand > 0.75) type = 'powerup_fire';
+                else if (pRand > 0.5) type = 'feather';
+                else if (pRand > 0.25) type = 'sword_stone';
+                
                 this.powerups.create(x, 400, type);
             }
             if (x % 5000 === 0) this.checkpoints.create(x, 500, 'flag');
