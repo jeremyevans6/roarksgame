@@ -33,6 +33,8 @@ export default class GameScene extends Phaser.Scene {
         }
 
         this.load.image('gem_icon', '/assets/gem.png');
+        this.load.image('coin', '/assets/coin.png');
+        this.load.image('spring', '/assets/spring.png');
         this.load.image('shop_bg', '/assets/shop.png');
         this.load.image('feather', '/assets/feather.png');
         this.load.image('sword_stone', '/assets/sword_stone.png');
@@ -178,6 +180,9 @@ export default class GameScene extends Phaser.Scene {
         this.fireballs = this.physics.add.group();
         this.checkpoints = this.physics.add.staticGroup();
         this.gems = this.physics.add.group({ allowGravity: false });
+        this.coins = this.physics.add.group({ allowGravity: false });
+        this.springs = this.physics.add.staticGroup();
+        this.breakableBlocks = this.physics.add.staticGroup();
         this.shops = this.physics.add.staticGroup();
 
         this.generateWorld();
@@ -221,7 +226,10 @@ export default class GameScene extends Phaser.Scene {
         this.physics.add.overlap(this.player, this.powerups, this.collectPowerup, null, this);
         this.physics.add.overlap(this.player, this.checkpoints, this.reachCheckpoint, null, this);
         this.physics.add.overlap(this.player, this.gems, this.collectGem, null, this);
+        this.physics.add.overlap(this.player, this.coins, this.collectCoin, null, this);
+        this.physics.add.overlap(this.player, this.springs, this.useSpring, null, this);
         this.physics.add.overlap(this.player, this.shops, this.enterShop, null, this);
+        this.physics.add.collider(this.player, this.breakableBlocks, this.hitBreakableBlock, null, this);
         
         this.physics.add.overlap(this.fireballs, this.mushrooms, this.fireballHit, null, this);
         this.physics.add.overlap(this.fireballs, this.frogs, this.fireballHit, null, this);
@@ -365,10 +373,15 @@ export default class GameScene extends Phaser.Scene {
                 const py = 200 + Math.random() * 200;
                 const width = Math.floor(2 + Math.random() * 5);
                 for (let j = 0; j < width; j++) {
-                    const frame = j === 0 ? 0 : (j === width - 1 ? 2 : 1); // Left edge, mid, right edge
+                    const frame = j === 0 ? 0 : (j === width - 1 ? 2 : 1);
                     const p = this.platforms.create(x + j * 32, py, 'tileset', frame);
                     p.setOrigin(0.5);
                     p.refreshBody();
+
+                    // Add breakable blocks above some platforms
+                    if (Math.random() > 0.8) {
+                        this.breakableBlocks.create(x + j * 32, py - 96, 'tileset', 3); // Frame 3 for block
+                    }
                 }
                 
                 // Add spikes to some platforms
@@ -376,10 +389,17 @@ export default class GameScene extends Phaser.Scene {
                     this.spikes.create(x + (width/2) * 32, py - 32, 'spikes');
                 }
 
-                // Add gems to platforms
+                // Add gems or coins to platforms
                 if (Math.random() > 0.5) {
                     this.gems.create(x + (width/2) * 32, py - 60, 'gem');
+                } else {
+                    this.coins.create(x + (width/2) * 32, py - 60, 'coin');
                 }
+            }
+
+            // Springs
+            if (rand > 0.9 && rand < 0.95) {
+                this.springs.create(x, 550, 'spring');
             }
             if (rand > 0.3 && rand < 0.4) {
                 const mp = this.movingPlatforms.create(x, 300, 'moving_platform');
@@ -573,10 +593,35 @@ export default class GameScene extends Phaser.Scene {
         }
     }
 
+    useSpring(player, spring) {
+        player.setVelocityY(-1000); // Super jump
+        this.tweens.add({
+            targets: spring,
+            scaleY: 0.5,
+            duration: 50,
+            yoyo: true
+        });
+    }
+
+    collectCoin(player, coin) {
+        coin.destroy();
+        this.score += 10;
+        this.updateHUD();
+    }
+
+    hitBreakableBlock(player, block) {
+        // Break if hit from below by Super Roark
+        if (player.body.touching.up && this.player.state !== 'SMALL') {
+            block.destroy();
+            this.score += 20;
+            this.updateHUD();
+        }
+    }
+
     collectGem(player, gem) {
         gem.destroy();
         this.gemCount++;
-        this.gemText.setText('Gems: ' + this.gemCount);
+        this.updateHUD();
     }
 
     enterShop(player, shop) {
