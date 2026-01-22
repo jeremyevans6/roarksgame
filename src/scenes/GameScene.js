@@ -7,20 +7,27 @@ export default class GameScene extends Phaser.Scene {
 
     preload() {
         // Asset loading with absolute paths for Vite compatibility
-        // Using 64x64 based on the detail level of the generated sprite sheet
-        this.load.spritesheet('roark_sheet', '/assets/roark_sheet.png', { frameWidth: 64, frameHeight: 64 });
-        this.load.spritesheet('enemy_mushroom', '/assets/mushroom_sheet.png', { frameWidth: 32, frameHeight: 32 });
-        this.load.spritesheet('enemy_frog', '/assets/frog_sheet.png', { frameWidth: 32, frameHeight: 32 });
-        this.load.spritesheet('enemy_turtle', '/assets/turtle_sheet.png', { frameWidth: 32, frameHeight: 32 });
+        this.load.spritesheet('roark', '/assets/roark.png', { frameWidth: 128, frameHeight: 128 });
+        this.load.spritesheet('roark_running', '/assets/roarkRunning.png', { frameWidth: 128, frameHeight: 128 });
+        
+        // Enemy Animations (Individual frames)
+        for (let i = 0; i < 6; i++) {
+            const frame = i.toString().padStart(3, '0');
+            this.load.image(`mushroom_walk_${i}`, `/assets/mushroom/animations/walk/west/frame_${frame}.png`);
+            this.load.image(`frog_walk_${i}`, `/assets/frog/animations/walking/west/frame_${frame}.png`);
+            this.load.image(`turtle_walk_${i}`, `/assets/turtle/animations/walking/west/frame_${frame}.png`);
+        }
+
         this.load.image('gem_icon', '/assets/gem.png');
         this.load.image('shop_bg', '/assets/shop.png');
+        this.load.image('tileset_img', '/assets/tileset.png');
 
         const graphics = this.make.graphics();
         
         // Procedural fallbacks (remain in place so engine has backup textures)
         graphics.fillStyle(0x3498db);
         graphics.fillRect(0, 0, 32, 32);
-        graphics.generateTexture('roark', 32, 32);
+        graphics.generateTexture('roark_placeholder', 32, 32);
         graphics.clear();
 
         graphics.fillStyle(0x2980b9);
@@ -158,10 +165,14 @@ export default class GameScene extends Phaser.Scene {
 
         this.generateWorld();
 
-        // Use procedural 'roark' if spritesheet failed, else use sheet
-        const playerTexture = this.textures.exists('roark_sheet') ? 'roark_sheet' : 'roark';
-        this.player = this.physics.add.sprite(100, 450, playerTexture);
+        // Use the new 128x128 roark sprite
+        this.player = this.physics.add.sprite(100, 400, 'roark');
         this.player.setCollideWorldBounds(true);
+        
+        // Physics body sized and offset to the character in the bottom-right of the 128x128 square
+        this.player.setBodySize(48, 96);
+        this.player.setOffset(80, 32); 
+        
         this.player.state = 'SMALL';
         this.player.isInvulnerable = false;
         this.player.lastCheckpoint = { x: 100, y: 450 };
@@ -230,48 +241,72 @@ export default class GameScene extends Phaser.Scene {
     }
 
     createAnimations() {
-        if (!this.textures.exists('roark_sheet')) {
-            console.warn("Roark spritesheet not found, skipping animations.");
-            return;
+        if (this.textures.exists('roark')) {
+            this.anims.create({
+                key: 'roark_idle',
+                frames: [{ key: 'roark', frame: 1 }],
+                frameRate: 1,
+                repeat: -1
+            });
+
+            this.anims.create({
+                key: 'roark_run',
+                frames: this.anims.generateFrameNumbers('roark_running', { start: 4, end: 15 }),
+                frameRate: 12,
+                repeat: -1
+            });
+
+            this.anims.create({
+                key: 'roark_jump',
+                frames: [{ key: 'roark', frame: 8 }],
+                frameRate: 1,
+                repeat: 0
+            });
+
+            this.anims.create({
+                key: 'roark_fall',
+                frames: [{ key: 'roark', frame: 11 }],
+                frameRate: 1,
+                repeat: -1
+            });
+
+            this.anims.create({
+                key: 'roark_attack',
+                frames: this.anims.generateFrameNumbers('roark', { start: 12, end: 14 }),
+                frameRate: 15,
+                repeat: 0
+            });
         }
 
-        // Row 1: Idle (frames 0-3)
+        // Enemy Walk Animations
         this.anims.create({
-            key: 'roark_idle',
-            frames: this.anims.generateFrameNumbers('roark_sheet', { start: 0, end: 3 }),
-            frameRate: 6,
+            key: 'mushroom_walk',
+            frames: [
+                { key: 'mushroom_walk_0' }, { key: 'mushroom_walk_1' }, { key: 'mushroom_walk_2' },
+                { key: 'mushroom_walk_3' }, { key: 'mushroom_walk_4' }, { key: 'mushroom_walk_5' }
+            ],
+            frameRate: 8,
             repeat: -1
         });
 
-        // Row 2: Run (frames 8-15) - assuming 8 frames per row layout
         this.anims.create({
-            key: 'roark_run',
-            frames: this.anims.generateFrameNumbers('roark_sheet', { start: 8, end: 15 }),
-            frameRate: 12,
+            key: 'frog_walk',
+            frames: [
+                { key: 'frog_walk_0' }, { key: 'frog_walk_1' }, { key: 'frog_walk_2' },
+                { key: 'frog_walk_3' }, { key: 'frog_walk_4' }, { key: 'frog_walk_5' }
+            ],
+            frameRate: 8,
             repeat: -1
         });
 
-        // Row 3: Jump/Fall (frames 16-19)
         this.anims.create({
-            key: 'roark_jump',
-            frames: this.anims.generateFrameNumbers('roark_sheet', { start: 16, end: 17 }),
-            frameRate: 10,
-            repeat: 0
-        });
-
-        this.anims.create({
-            key: 'roark_fall',
-            frames: this.anims.generateFrameNumbers('roark_sheet', { start: 18, end: 19 }),
-            frameRate: 10,
+            key: 'turtle_walk',
+            frames: [
+                { key: 'turtle_walk_0' }, { key: 'turtle_walk_1' }, { key: 'turtle_walk_2' },
+                { key: 'turtle_walk_3' }, { key: 'turtle_walk_4' }, { key: 'turtle_walk_5' }
+            ],
+            frameRate: 8,
             repeat: -1
-        });
-
-        // Row 4: Attack (frames 24-27)
-        this.anims.create({
-            key: 'roark_attack',
-            frames: this.anims.generateFrameNumbers('roark_sheet', { start: 24, end: 27 }),
-            frameRate: 15,
-            repeat: 0
         });
     }
 
@@ -328,19 +363,22 @@ export default class GameScene extends Phaser.Scene {
     spawnEnemyAt(x) {
         const r = Math.random();
         if (r < 0.4) {
-            const m = this.mushrooms.create(x, 500, 'mushroom');
+            const m = this.mushrooms.create(x, 500, 'mushroom_walk_0');
             m.setVelocityX(-100);
             m.setBounce(1, 0);
             m.setCollideWorldBounds(true);
+            m.play('mushroom_walk');
         } else if (r < 0.7) {
-            const f = this.frogs.create(x, 500, 'frog');
+            const f = this.frogs.create(x, 500, 'frog_walk_0');
             f.nextJump = 0;
             f.setCollideWorldBounds(true);
+            f.play('frog_walk');
         } else {
-            const t = this.turtles.create(x, 500, 'turtle');
+            const t = this.turtles.create(x, 500, 'turtle_walk_0');
             t.setVelocityX(-50);
             t.setBounce(1, 0);
             t.setCollideWorldBounds(true);
+            t.play('turtle_walk');
         }
     }
 
@@ -377,10 +415,12 @@ export default class GameScene extends Phaser.Scene {
 
         if (this.cursors.left.isDown || this.wasd.left.isDown) {
             this.player.setVelocityX(-currentSpeed);
-            this.player.flipX = true;
+            this.player.setFlipX(true);
+            this.player.setOffset(0, 32); // Adjust offset for flipped bottom-right sprite
         } else if (this.cursors.right.isDown || this.wasd.right.isDown) {
             this.player.setVelocityX(currentSpeed);
-            this.player.flipX = false;
+            this.player.setFlipX(false);
+            this.player.setOffset(80, 32); // Default bottom-right offset
         } else {
             this.player.setVelocityX(0);
         }
@@ -534,12 +574,12 @@ export default class GameScene extends Phaser.Scene {
         powerup.destroy();
         if (type === 'powerup_mushroom') {
             this.player.state = 'SUPER';
-            this.player.setTexture('roark_super');
+            // Scale body slightly for Super state but keep 128x128 sheet
+            this.player.body.setSize(64, 110);
+            this.player.setOffset(this.player.flipX ? 0 : 64, 18);
         } else if (type === 'powerup_fire') {
             this.player.state = 'FIRE';
-            this.player.setTexture('roark_fire');
         }
-        this.player.body.setSize(48, 48);
         this.updateHUD();
     }
 
@@ -552,8 +592,9 @@ export default class GameScene extends Phaser.Scene {
 
     shrinkPlayer() {
         this.player.state = 'SMALL';
-        this.player.setTexture('roark_sheet');
-        this.player.body.setSize(32, 32);
+        this.player.setTexture('roark');
+        this.player.body.setSize(48, 96);
+        this.player.setOffset(this.player.flipX ? 0 : 80, 32);
         this.becomeInvulnerable();
         this.updateHUD();
     }
