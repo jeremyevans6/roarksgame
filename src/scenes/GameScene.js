@@ -1,0 +1,586 @@
+import Phaser from 'phaser';
+
+export default class GameScene extends Phaser.Scene {
+    constructor() {
+        super('GameScene');
+    }
+
+    preload() {
+        // Asset loading with absolute paths for Vite compatibility
+        // Using 64x64 based on the detail level of the generated sprite sheet
+        this.load.spritesheet('roark_sheet', '/assets/roark_sheet.png', { frameWidth: 64, frameHeight: 64 });
+        this.load.spritesheet('enemy_mushroom', '/assets/mushroom_sheet.png', { frameWidth: 32, frameHeight: 32 });
+        this.load.spritesheet('enemy_frog', '/assets/frog_sheet.png', { frameWidth: 32, frameHeight: 32 });
+        this.load.spritesheet('enemy_turtle', '/assets/turtle_sheet.png', { frameWidth: 32, frameHeight: 32 });
+        this.load.image('gem_icon', '/assets/gem.png');
+        this.load.image('shop_bg', '/assets/shop.png');
+
+        const graphics = this.make.graphics();
+        
+        // Procedural fallbacks (remain in place so engine has backup textures)
+        graphics.fillStyle(0x3498db);
+        graphics.fillRect(0, 0, 32, 32);
+        graphics.generateTexture('roark', 32, 32);
+        graphics.clear();
+
+        graphics.fillStyle(0x2980b9);
+        graphics.fillRect(0, 0, 48, 48);
+        graphics.generateTexture('roark_super', 48, 48);
+        graphics.clear();
+
+        graphics.fillStyle(0x9b59b6);
+        graphics.fillRect(0, 0, 48, 48);
+        graphics.generateTexture('roark_fire', 48, 48);
+        graphics.clear();
+
+        graphics.fillStyle(0x2ecc71);
+        graphics.fillRect(0, 0, 800, 64);
+        graphics.generateTexture('floor', 800, 64);
+        graphics.clear();
+
+        graphics.fillStyle(0x1abc9c);
+        graphics.fillRect(0, 0, 128, 32);
+        graphics.generateTexture('moving_platform', 128, 32);
+        graphics.clear();
+
+        graphics.fillStyle(0x95a5a6);
+        graphics.beginPath();
+        graphics.moveTo(0, 32);
+        graphics.lineTo(16, 0);
+        graphics.lineTo(32, 32);
+        graphics.closePath();
+        graphics.fill();
+        graphics.generateTexture('spikes', 32, 32);
+        graphics.clear();
+
+        graphics.fillStyle(0xe74c3c);
+        graphics.fillCircle(16, 16, 16);
+        graphics.generateTexture('mushroom', 32, 32);
+        graphics.clear();
+
+        graphics.fillStyle(0x00d2d3);
+        graphics.fillRect(0, 0, 32, 24);
+        graphics.generateTexture('frog', 32, 24);
+        graphics.clear();
+
+        graphics.fillStyle(0xf1c40f);
+        graphics.fillCircle(16, 16, 16);
+        graphics.generateTexture('turtle', 32, 32);
+        graphics.clear();
+
+        graphics.fillStyle(0xe67e22);
+        graphics.fillRect(0, 0, 24, 24);
+        graphics.generateTexture('powerup_mushroom', 24, 24);
+        graphics.clear();
+
+        graphics.fillStyle(0xf39c12);
+        graphics.fillCircle(12, 12, 12);
+        graphics.generateTexture('powerup_fire', 24, 24);
+        graphics.clear();
+
+        graphics.fillStyle(0xe74c3c);
+        graphics.fillCircle(8, 8, 8);
+        graphics.generateTexture('fireball', 16, 16);
+        graphics.clear();
+
+        graphics.fillStyle(0xffffff);
+        graphics.fillRect(0, 0, 8, 48);
+        graphics.fillStyle(0x2ecc71);
+        graphics.fillRect(8, 0, 24, 16);
+        graphics.generateTexture('flag', 32, 48);
+        graphics.clear();
+
+        graphics.fillStyle(0x00d2d3);
+        graphics.beginPath();
+        graphics.moveTo(12, 0);
+        graphics.lineTo(24, 12);
+        graphics.lineTo(12, 24);
+        graphics.lineTo(0, 12);
+        graphics.closePath();
+        graphics.fill();
+        graphics.generateTexture('gem', 24, 24);
+        graphics.clear();
+
+        graphics.fillStyle(0x8e44ad);
+        graphics.fillRect(0, 16, 48, 32);
+        graphics.beginPath();
+        graphics.moveTo(0, 16);
+        graphics.lineTo(24, 0);
+        graphics.lineTo(48, 16);
+        graphics.closePath();
+        graphics.fill();
+        graphics.generateTexture('shop', 48, 48);
+        graphics.clear();
+
+        graphics.fillStyle(0xffffff, 0.3);
+        graphics.fillCircle(20, 20, 20);
+        graphics.fillCircle(40, 20, 25);
+        graphics.fillCircle(60, 20, 20);
+        graphics.generateTexture('cloud', 80, 50);
+        graphics.clear();
+
+        graphics.fillStyle(0x2c3e50, 0.5);
+        graphics.beginPath();
+        graphics.moveTo(0, 200);
+        graphics.lineTo(150, 0);
+        graphics.lineTo(300, 200);
+        graphics.closePath();
+        graphics.fill();
+        graphics.generateTexture('mountain', 300, 200);
+        graphics.clear();
+    }
+
+    create() {
+        // World setup - 480,000 pixels
+        this.worldWidth = 480000;
+        this.physics.world.setBounds(0, 0, this.worldWidth, 600);
+        this.cameras.main.setBounds(0, 0, this.worldWidth, 600);
+
+        this.createParallax();
+
+        this.dayNightOverlay = this.add.rectangle(0, 0, 800, 600, 0x000033, 0)
+            .setOrigin(0)
+            .setScrollFactor(0)
+            .setDepth(100);
+        this.timeOfDay = 0;
+
+        this.platforms = this.physics.add.staticGroup();
+        this.movingPlatforms = this.physics.add.group({ allowGravity: false, immovable: true });
+        this.spikes = this.physics.add.staticGroup();
+        this.mushrooms = this.physics.add.group();
+        this.frogs = this.physics.add.group();
+        this.turtles = this.physics.add.group();
+        this.powerups = this.physics.add.group();
+        this.fireballs = this.physics.add.group();
+        this.checkpoints = this.physics.add.staticGroup();
+        this.gems = this.physics.add.group({ allowGravity: false });
+        this.shops = this.physics.add.staticGroup();
+
+        this.generateWorld();
+
+        // Use procedural 'roark' if spritesheet failed, else use sheet
+        const playerTexture = this.textures.exists('roark_sheet') ? 'roark_sheet' : 'roark';
+        this.player = this.physics.add.sprite(100, 450, playerTexture);
+        this.player.setCollideWorldBounds(true);
+        this.player.state = 'SMALL';
+        this.player.isInvulnerable = false;
+        this.player.lastCheckpoint = { x: 100, y: 450 };
+        this.player.dashTime = 0;
+        this.player.isDashing = false;
+        this.player.isAttacking = false;
+        this.player.upgrades = { jumpPower: -600, speed: 300 };
+        
+        this.cameras.main.startFollow(this.player, true, 0.1, 0.1);
+
+        this.createAnimations();
+
+        this.physics.add.collider(this.player, this.platforms);
+        this.physics.add.collider(this.player, this.movingPlatforms);
+        this.physics.add.collider(this.mushrooms, this.platforms);
+        this.physics.add.collider(this.mushrooms, this.movingPlatforms);
+        this.physics.add.collider(this.frogs, this.platforms);
+        this.physics.add.collider(this.turtles, this.platforms);
+        this.physics.add.collider(this.powerups, this.platforms);
+        
+        this.physics.add.collider(this.fireballs, this.platforms, (fb) => {
+            if (fb.body.blocked.left || fb.body.blocked.right) fb.destroy();
+        });
+
+        this.physics.add.overlap(this.player, this.spikes, this.hitSpikes, null, this);
+        this.physics.add.overlap(this.player, this.mushrooms, this.hitEnemy, null, this);
+        this.physics.add.overlap(this.player, this.frogs, this.hitEnemy, null, this);
+        this.physics.add.overlap(this.player, this.turtles, this.hitEnemy, null, this);
+        this.physics.add.overlap(this.player, this.powerups, this.collectPowerup, null, this);
+        this.physics.add.overlap(this.player, this.checkpoints, this.reachCheckpoint, null, this);
+        this.physics.add.overlap(this.player, this.gems, this.collectGem, null, this);
+        this.physics.add.overlap(this.player, this.shops, this.enterShop, null, this);
+        
+        this.physics.add.overlap(this.fireballs, this.mushrooms, this.fireballHit, null, this);
+        this.physics.add.overlap(this.fireballs, this.frogs, this.fireballHit, null, this);
+        this.physics.add.overlap(this.fireballs, this.turtles, this.fireballHit, null, this);
+
+        this.cursors = this.input.keyboard.createCursorKeys();
+        this.wasd = this.input.keyboard.addKeys({
+            up: Phaser.Input.Keyboard.KeyCodes.W,
+            down: Phaser.Input.Keyboard.KeyCodes.S,
+            left: Phaser.Input.Keyboard.KeyCodes.A,
+            right: Phaser.Input.Keyboard.KeyCodes.D,
+            shift: Phaser.Input.Keyboard.KeyCodes.SHIFT
+        });
+        this.swordKey = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.Z);
+        this.fireKey = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.X);
+
+        this.jumpCount = 0;
+        this.score = 0;
+        this.lives = 3;
+        this.gemCount = 0;
+
+        this.setupHUD();
+
+        this.weatherParticles = this.add.particles(0, 0, 'fireball', {
+            x: { min: 0, max: 800 },
+            y: 0,
+            lifespan: 2000,
+            speedY: { min: 200, max: 400 },
+            scale: { start: 0.2, end: 0 },
+            alpha: { start: 0.5, end: 0 },
+            frequency: -1,
+            blendMode: 'ADD'
+        }).setScrollFactor(0).setDepth(150);
+    }
+
+    createAnimations() {
+        if (!this.textures.exists('roark_sheet')) {
+            console.warn("Roark spritesheet not found, skipping animations.");
+            return;
+        }
+
+        // Row 1: Idle (frames 0-3)
+        this.anims.create({
+            key: 'roark_idle',
+            frames: this.anims.generateFrameNumbers('roark_sheet', { start: 0, end: 3 }),
+            frameRate: 6,
+            repeat: -1
+        });
+
+        // Row 2: Run (frames 8-15) - assuming 8 frames per row layout
+        this.anims.create({
+            key: 'roark_run',
+            frames: this.anims.generateFrameNumbers('roark_sheet', { start: 8, end: 15 }),
+            frameRate: 12,
+            repeat: -1
+        });
+
+        // Row 3: Jump/Fall (frames 16-19)
+        this.anims.create({
+            key: 'roark_jump',
+            frames: this.anims.generateFrameNumbers('roark_sheet', { start: 16, end: 17 }),
+            frameRate: 10,
+            repeat: 0
+        });
+
+        this.anims.create({
+            key: 'roark_fall',
+            frames: this.anims.generateFrameNumbers('roark_sheet', { start: 18, end: 19 }),
+            frameRate: 10,
+            repeat: -1
+        });
+
+        // Row 4: Attack (frames 24-27)
+        this.anims.create({
+            key: 'roark_attack',
+            frames: this.anims.generateFrameNumbers('roark_sheet', { start: 24, end: 27 }),
+            frameRate: 15,
+            repeat: 0
+        });
+    }
+
+    createParallax() {
+        for (let i = 0; i < 200; i++) {
+            const cloud = this.add.image(Math.random() * this.worldWidth, 50 + Math.random() * 200, 'cloud');
+            cloud.setScrollFactor(0.2);
+            cloud.setDepth(-20);
+        }
+        for (let i = 0; i < 100; i++) {
+            const m = this.add.image(i * 1000 + Math.random() * 500, 400, 'mountain');
+            m.setScrollFactor(0.5);
+            m.setDepth(-10);
+            m.setScale(1.5 + Math.random());
+        }
+    }
+
+    generateWorld() {
+        for (let i = 0; i < this.worldWidth / 800; i++) {
+            this.platforms.create(i * 800 + 400, 568, 'floor');
+        }
+        for (let x = 800; x < this.worldWidth; x += 400) {
+            const rand = Math.random();
+            if (rand < 0.3) {
+                const py = 200 + Math.random() * 200;
+                this.platforms.create(x, py, 'floor').setScale(0.2, 0.5).refreshBody();
+                if (Math.random() > 0.7) this.spikes.create(x, py - 32, 'spikes');
+                if (Math.random() > 0.5) this.gems.create(x, py - 60, 'gem');
+            }
+            if (rand > 0.3 && rand < 0.4) {
+                const mp = this.movingPlatforms.create(x, 300, 'moving_platform');
+                mp.startX = x;
+                mp.range = 200;
+                mp.direction = 1;
+                mp.speed = 100 + Math.random() * 100;
+            }
+            if (rand > 0.4 && rand < 0.7) {
+                this.spawnEnemyAt(x);
+                if (Math.random() > 0.5) this.spawnEnemyAt(x + 100);
+            }
+            if (rand > 0.7 && rand < 0.85) this.gems.create(x, 500, 'gem');
+            if (x % 10000 === 0) {
+                this.shops.create(x, 520, 'shop');
+                this.add.text(x - 20, 450, 'SHOP', { fontSize: '16px', fill: '#fff' });
+            }
+            if (rand > 0.95) {
+                const type = Math.random() > 0.5 ? 'powerup_mushroom' : 'powerup_fire';
+                this.powerups.create(x, 400, type);
+            }
+            if (x % 5000 === 0) this.checkpoints.create(x, 500, 'flag');
+        }
+    }
+
+    spawnEnemyAt(x) {
+        const r = Math.random();
+        if (r < 0.4) {
+            const m = this.mushrooms.create(x, 500, 'mushroom');
+            m.setVelocityX(-100);
+            m.setBounce(1, 0);
+            m.setCollideWorldBounds(true);
+        } else if (r < 0.7) {
+            const f = this.frogs.create(x, 500, 'frog');
+            f.nextJump = 0;
+            f.setCollideWorldBounds(true);
+        } else {
+            const t = this.turtles.create(x, 500, 'turtle');
+            t.setVelocityX(-50);
+            t.setBounce(1, 0);
+            t.setCollideWorldBounds(true);
+        }
+    }
+
+    setupHUD() {
+        this.scoreText = this.add.text(16, 16, 'Score: 0', { fontSize: '24px', fill: '#fff' }).setScrollFactor(0);
+        this.livesText = this.add.text(16, 48, 'Lives: 3', { fontSize: '24px', fill: '#fff' }).setScrollFactor(0);
+        this.gemText = this.add.text(16, 80, 'Gems: 0', { fontSize: '24px', fill: '#00d2d3' }).setScrollFactor(0);
+        this.stateText = this.add.text(16, 112, 'State: SMALL', { fontSize: '18px', fill: '#fff' }).setScrollFactor(0);
+    }
+
+    update(time, delta) {
+        this.timeOfDay += delta / 120000;
+        if (this.timeOfDay > 1) this.timeOfDay = 0;
+        const alpha = Math.abs(Math.sin(this.timeOfDay * Math.PI)) * 0.6;
+        this.dayNightOverlay.setAlpha(alpha);
+
+        if (Math.random() < 0.001) {
+            this.weatherParticles.setFrequency(this.weatherParticles.frequency === -1 ? 10 : -1);
+        }
+
+        let currentSpeed = this.player.upgrades.speed;
+        if (Phaser.Input.Keyboard.JustDown(this.wasd.shift) && time > this.player.dashTime) {
+            this.player.isDashing = true;
+            this.player.dashTime = time + 1000;
+            this.time.delayedCall(200, () => this.player.isDashing = false);
+        }
+
+        if (this.player.isDashing) {
+            currentSpeed *= 3;
+            this.player.setAlpha(0.7);
+        } else {
+            this.player.setAlpha(this.player.isInvulnerable ? 0.5 : 1);
+        }
+
+        if (this.cursors.left.isDown || this.wasd.left.isDown) {
+            this.player.setVelocityX(-currentSpeed);
+            this.player.flipX = true;
+        } else if (this.cursors.right.isDown || this.wasd.right.isDown) {
+            this.player.setVelocityX(currentSpeed);
+            this.player.flipX = false;
+        } else {
+            this.player.setVelocityX(0);
+        }
+
+        if (this.player.body.touching.down) {
+            this.jumpCount = 0;
+        }
+
+        if (Phaser.Input.Keyboard.JustDown(this.cursors.up) || 
+            Phaser.Input.Keyboard.JustDown(this.wasd.up) ||
+            Phaser.Input.Keyboard.JustDown(this.cursors.space)) {
+            if (this.player.body.touching.down || this.jumpCount < 2) {
+                this.player.setVelocityY(this.player.upgrades.jumpPower);
+                this.jumpCount++;
+            }
+        }
+
+        this.movingPlatforms.children.iterate(mp => {
+            if (mp.x > mp.startX + mp.range) mp.direction = -1;
+            if (mp.x < mp.startX - mp.range) mp.direction = 1;
+            mp.setVelocityX(mp.speed * mp.direction);
+        });
+
+        if (Phaser.Input.Keyboard.JustDown(this.swordKey)) this.attack();
+        if (Phaser.Input.Keyboard.JustDown(this.fireKey) && this.player.state === 'FIRE') this.shootFireball();
+
+        this.updateEnemyAI(time);
+        this.handleAnimations();
+    }
+
+    handleAnimations() {
+        if (!this.anims.exists('roark_idle')) return;
+
+        if (this.player.isAttacking) {
+            this.player.play('roark_attack', true);
+            return;
+        }
+
+        if (this.player.body.touching.down) {
+            if (this.player.body.velocity.x !== 0) {
+                this.player.play('roark_run', true);
+            } else {
+                this.player.play('roark_idle', true);
+            }
+        } else {
+            if (this.player.body.velocity.y < 0) {
+                this.player.play('roark_jump', true);
+            } else {
+                this.player.play('roark_fall', true);
+            }
+        }
+    }
+
+    collectGem(player, gem) {
+        gem.destroy();
+        this.gemCount++;
+        this.gemText.setText('Gems: ' + this.gemCount);
+    }
+
+    enterShop(player, shop) {
+        if (this.gemCount >= 10) {
+            this.gemCount -= 10;
+            this.gemText.setText('Gems: ' + this.gemCount);
+            if (Math.random() > 0.5) {
+                this.player.upgrades.jumpPower -= 50;
+            } else {
+                this.player.upgrades.speed += 50;
+            }
+            this.tweens.add({ targets: shop, scale: 1.2, duration: 100, yoyo: true });
+        }
+    }
+
+    updateEnemyAI(time) {
+        this.mushrooms.children.iterate(m => {
+            if (m.body.blocked.left) m.setVelocityX(100);
+            if (m.body.blocked.right) m.setVelocityX(-100);
+        });
+        this.frogs.children.iterate(f => {
+            if (time > f.nextJump && f.body.touching.down) {
+                f.setVelocityY(-400);
+                f.setVelocityX(this.player.x > f.x ? 150 : -150);
+                f.nextJump = time + 1500 + Math.random() * 1000;
+            }
+        });
+        this.turtles.children.iterate(t => {
+            if (t.body.blocked.left) t.setVelocityX(50);
+            if (t.body.blocked.right) t.setVelocityX(-50);
+        });
+    }
+
+    hitSpikes(player, spike) {
+        if (this.player.isInvulnerable) return;
+        if (this.player.state !== 'SMALL') {
+            this.shrinkPlayer();
+        } else {
+            this.die();
+        }
+    }
+
+    attack() {
+        this.player.isAttacking = true;
+        this.time.delayedCall(300, () => this.player.isAttacking = false);
+
+        const attackRange = 60;
+        const xOffset = this.player.flipX ? -attackRange : attackRange;
+        const hitbox = this.add.rectangle(this.player.x + xOffset/2, this.player.y, attackRange, 40, 0xffff00, 0.3);
+        this.physics.add.existing(hitbox);
+        const hit = (entity) => {
+            this.score += 100;
+            this.updateHUD();
+            entity.destroy();
+        };
+        this.physics.add.overlap(hitbox, this.mushrooms, (h, e) => hit(e));
+        this.physics.add.overlap(hitbox, this.frogs, (h, e) => hit(e));
+        this.physics.add.overlap(hitbox, this.turtles, (h, e) => hit(e));
+        this.time.delayedCall(150, () => hitbox.destroy());
+    }
+
+    shootFireball() {
+        const fb = this.fireballs.create(this.player.x, this.player.y, 'fireball');
+        fb.setVelocity(this.player.flipX ? -400 : 400, 200);
+        fb.setBounce(0.8);
+        fb.setCollideWorldBounds(false);
+    }
+
+    fireballHit(fb, entity) {
+        fb.destroy();
+        entity.destroy();
+        this.score += 150;
+        this.updateHUD();
+    }
+
+    hitEnemy(player, enemy) {
+        if (this.player.isInvulnerable) return;
+        if (player.body.touching.down && player.y < enemy.y - 10) {
+            enemy.destroy();
+            player.setVelocityY(-450);
+            this.score += 50;
+            this.updateHUD();
+        } else {
+            if (this.player.state !== 'SMALL') {
+                this.shrinkPlayer();
+            } else {
+                this.die();
+            }
+        }
+    }
+
+    collectPowerup(player, powerup) {
+        const type = powerup.texture.key;
+        powerup.destroy();
+        if (type === 'powerup_mushroom') {
+            this.player.state = 'SUPER';
+            this.player.setTexture('roark_super');
+        } else if (type === 'powerup_fire') {
+            this.player.state = 'FIRE';
+            this.player.setTexture('roark_fire');
+        }
+        this.player.body.setSize(48, 48);
+        this.updateHUD();
+    }
+
+    reachCheckpoint(player, flag) {
+        if (this.player.lastCheckpoint.x !== flag.x) {
+            this.player.lastCheckpoint = { x: flag.x, y: flag.y };
+            flag.setTint(0x00ff00);
+        }
+    }
+
+    shrinkPlayer() {
+        this.player.state = 'SMALL';
+        this.player.setTexture('roark_sheet');
+        this.player.body.setSize(32, 32);
+        this.becomeInvulnerable();
+        this.updateHUD();
+    }
+
+    becomeInvulnerable() {
+        this.player.isInvulnerable = true;
+        this.player.setAlpha(0.5);
+        this.time.delayedCall(2000, () => {
+            this.player.isInvulnerable = false;
+            this.player.setAlpha(1);
+        });
+    }
+
+    die() {
+        this.lives--;
+        this.updateHUD();
+        if (this.lives <= 0) {
+            this.scene.restart();
+        } else {
+            this.player.setPosition(this.player.lastCheckpoint.x, this.player.lastCheckpoint.y - 50);
+            this.becomeInvulnerable();
+        }
+    }
+
+    updateHUD() {
+        this.scoreText.setText('Score: ' + this.score);
+        this.livesText.setText('Lives: ' + this.lives);
+        this.stateText.setText('State: ' + this.player.state);
+    }
+}
