@@ -12,7 +12,9 @@
   "author": "",
   "license": "ISC",
   "dependencies": {
-    "phaser": "^3.90.0"
+    "idb-keyval": "^6.2.2",
+    "phaser": "^3.90.0",
+    "sql.js": "^1.13.0"
   },
   "devDependencies": {
     "vite": "^7.3.1"

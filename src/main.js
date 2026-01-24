@@ -2,6 +2,8 @@ import Phaser from 'phaser';
 import MenuScene from './scenes/MenuScene';
 import GameScene from './scenes/GameScene';
 import PauseScene from './scenes/PauseScene';
+import TileEditorScene from './scenes/TileEditorScene';
+import { bootstrapTileSelections } from './utils/TileSelectionStore';
 
 const config = {
     type: Phaser.AUTO,
@@ -9,6 +11,10 @@ const config = {
     height: 600,
     parent: 'game-container',
     pixelArt: true,
+    scale: {
+        mode: Phaser.Scale.FIT,
+        autoCenter: Phaser.Scale.CENTER_BOTH
+    },
     physics: {
         default: 'arcade',
         arcade: {
@@ -16,7 +22,13 @@ const config = {
             debug: false
         }
     },
-    scene: [MenuScene, GameScene, PauseScene]
+    scene: [MenuScene, GameScene, PauseScene, TileEditorScene]
 };
 
-new Phaser.Game(config);
+const startGame = () => {
+    new Phaser.Game(config);
+};
+
+bootstrapTileSelections()
+    .catch(() => null)
+    .finally(() => startGame());

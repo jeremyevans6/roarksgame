@@ -6,6 +6,7 @@ export default class PauseScene extends Phaser.Scene {
     }
 
     create() {
+        document.title = "PAUSED";
         const { width, height } = this.scale;
 
         // Overlay

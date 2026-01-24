@@ -6,7 +6,6 @@ export default class MenuScene extends Phaser.Scene {
     }
 
     preload() {
-        // Load background elements if any, or use graphics
     }
 
     create() {
@@ -31,7 +30,6 @@ export default class MenuScene extends Phaser.Scene {
             fill: '#fff'
         }).setOrigin(0.5);
 
-        // Animation for start button
         this.tweens.add({
             targets: startBtn,
             alpha: 0,
@@ -46,7 +44,11 @@ export default class MenuScene extends Phaser.Scene {
             "SPACE: DOUBLE JUMP",
             "SHIFT: DASH",
             "Z: ATTACK (COTTON CANDY)",
-            "X: FIREBALL (WHEN POWERED UP)"
+            "X: FIREBALL (WHEN POWERED UP)",
+            "C: SWAP POWER-UP",
+            "E: INTERACT (SHOP / QUEST)",
+            "F: TOGGLE FULLSCREEN",
+            "T: TILESET EDITOR"
         ];
 
         controls.forEach((text, i) => {
@@ -59,7 +61,16 @@ export default class MenuScene extends Phaser.Scene {
 
         // Input
         this.input.keyboard.once('keydown-SPACE', () => {
+            console.error("TRANSITIONING_TO_GAMESCENE");
             this.scene.start('GameScene');
+        });
+
+        this.input.keyboard.on('keydown-F', () => {
+            this.scale.toggleFullscreen();
+        });
+
+        this.input.keyboard.once('keydown-T', () => {
+            this.scene.start('TileEditorScene');
         });
     }
 }

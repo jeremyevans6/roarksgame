@@ -5,12 +5,182 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Roark's Game</title>
     <style>
+        :root {
+            --editor-bg: rgba(12, 12, 14, 0.94);
+            --editor-panel: rgba(24, 26, 32, 0.92);
+            --editor-text: #e6e6e6;
+            --editor-accent: #f1c40f;
+            --editor-muted: #8c8c8c;
+            --editor-border: rgba(255, 255, 255, 0.08);
+        }
         body { margin: 0; background: #000; overflow: hidden; display: flex; justify-content: center; align-items: center; height: 100vh; }
         canvas { box-shadow: 0 0 20px rgba(0,0,0,0.5); border: 2px solid #333; }
+        #editor-root {
+            position: fixed;
+            inset: 0;
+            display: none;
+            z-index: 20;
+            color: var(--editor-text);
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        }
+        #editor-root.is-active { display: block; }
+        .tile-editor {
+            position: absolute;
+            inset: 0;
+            background: var(--editor-bg);
+            display: flex;
+            flex-direction: column;
+        }
+        .tile-editor__header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 14px 18px;
+            border-bottom: 1px solid var(--editor-border);
+            background: linear-gradient(90deg, rgba(20, 20, 24, 0.96), rgba(10, 10, 12, 0.96));
+        }
+        .tile-editor__title {
+            font-size: 18px;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+            color: var(--editor-accent);
+        }
+        .tile-editor__content {
+            flex: 1;
+            display: grid;
+            grid-template-columns: 1.2fr 0.8fr;
+            gap: 16px;
+            padding: 16px 18px 22px;
+        }
+        .tile-editor__left,
+        .tile-editor__right {
+            background: var(--editor-panel);
+            border: 1px solid var(--editor-border);
+            border-radius: 8px;
+            padding: 16px;
+            display: flex;
+            flex-direction: column;
+            gap: 14px;
+            min-height: 0;
+        }
+        .tile-editor__tabs {
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+        }
+        .tile-editor__tab {
+            border: 1px solid var(--editor-border);
+            background: rgba(255,255,255,0.03);
+            color: var(--editor-text);
+            padding: 6px 12px;
+            border-radius: 999px;
+            cursor: pointer;
+            font-size: 13px;
+        }
+        .tile-editor__tab.is-active {
+            border-color: var(--editor-accent);
+            color: var(--editor-accent);
+        }
+        .tile-editor__canvas-wrap {
+            flex: 1;
+            background: rgba(0,0,0,0.35);
+            border-radius: 8px;
+            border: 1px solid var(--editor-border);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            overflow: auto;
+            padding: 10px;
+        }
+        .tile-editor__right h3 {
+            margin: 0;
+            font-size: 14px;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+            color: var(--editor-muted);
+        }
+        .tile-editor__new {
+            display: flex;
+            gap: 8px;
+        }
+        .tile-editor__input,
+        .tile-editor__select {
+            background: rgba(0,0,0,0.3);
+            border: 1px solid var(--editor-border);
+            color: var(--editor-text);
+            padding: 6px 10px;
+            border-radius: 6px;
+            flex: 1;
+        }
+        .tile-editor__button {
+            background: rgba(241, 196, 15, 0.16);
+            border: 1px solid rgba(241, 196, 15, 0.5);
+            color: var(--editor-accent);
+            padding: 6px 10px;
+            border-radius: 6px;
+            cursor: pointer;
+        }
+        .tile-editor__list {
+            display: grid;
+            gap: 8px;
+            overflow: auto;
+            padding-right: 4px;
+            max-height: 280px;
+        }
+        .tile-editor__item {
+            display: grid;
+            grid-template-columns: auto 1fr auto;
+            align-items: center;
+            gap: 10px;
+            padding: 8px 10px;
+            border-radius: 6px;
+            border: 1px solid transparent;
+            background: rgba(0,0,0,0.25);
+            cursor: pointer;
+        }
+        .tile-editor__item.is-selected {
+            border-color: rgba(241, 196, 15, 0.6);
+            background: rgba(241, 196, 15, 0.08);
+        }
+        .tile-editor__preview {
+            width: 34px;
+            height: 34px;
+            border: 1px solid var(--editor-border);
+            border-radius: 4px;
+            background: rgba(0,0,0,0.4);
+        }
+        .tile-editor__meta {
+            font-size: 12px;
+            color: var(--editor-muted);
+        }
+        .tile-editor__row {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            justify-content: space-between;
+        }
+        .tile-editor__hint {
+            font-size: 12px;
+            color: var(--editor-muted);
+            line-height: 1.4;
+        }
+        .tile-editor__exit {
+            background: rgba(255,255,255,0.06);
+            border: 1px solid var(--editor-border);
+            color: var(--editor-text);
+            padding: 6px 12px;
+            border-radius: 6px;
+            cursor: pointer;
+        }
+        .tile-editor__status {
+            font-size: 12px;
+            color: var(--editor-accent);
+        }
     </style>
 </head>
 <body>
     <div id="game-container"></div>
+    <div id="editor-root"></div>
     <script type="module" src="/src/main.js"></script>
 </body>
 </html>
