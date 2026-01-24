@@ -14,8 +14,22 @@ export default class SegmentManager {
     }
 
     update(playerX) {
-        const currentIndex = Math.max(0, Math.min(this.config.levelCount - 1, Math.floor(playerX / this.config.levelStride)));
-        const desired = new Set([currentIndex - 1, currentIndex, currentIndex + 1].filter(i => i >= 0 && i < this.config.levelCount));
+        const camera = this.scene?.cameras?.main;
+        const worldView = camera?.worldView;
+        const stride = this.config.levelStride;
+        const maxIndex = this.config.levelCount - 1;
+        const currentIndex = Math.max(0, Math.min(maxIndex, Math.floor(playerX / stride)));
+        this.currentIndex = currentIndex;
+        const screenWidth = worldView?.width ?? 0;
+        const paddedLeft = (worldView?.left ?? playerX) - screenWidth * 2;
+        const paddedRight = (worldView?.right ?? playerX) + screenWidth * 2;
+        const startIndex = Math.max(0, Math.floor(paddedLeft / stride));
+        const endIndex = Math.min(maxIndex, Math.floor(paddedRight / stride));
+        const desired = new Set();
+
+        for (let index = startIndex; index <= endIndex; index++) {
+            desired.add(index);
+        }
 
         for (const index of desired) {
             if (!this.activeSegments.has(index)) {
@@ -28,6 +42,90 @@ export default class SegmentManager {
                 this.despawnSegment(index);
             }
         }
+
+        this.ensureGateForCurrent();
+        this.ensureBossForCurrent();
+    }
+
+    getSegmentPlacementData(index) {
+        const tileSize = 32;
+        const tileScale = 2;
+        const segmentStart = index * this.config.levelStride;
+        const segmentEnd = segmentStart + this.config.segmentLength;
+        const groundSurfaceY = (this.config.groundY ?? 500) - (tileSize * tileScale / 2);
+        const pitRanges = getPitRangesForLevel(index, this.config, tileSize * tileScale);
+        const nudgeOutOfPit = (x) => {
+            if (!this.isInPit(x, pitRanges)) return x;
+            const step = tileSize * tileScale;
+            for (let i = 1; i <= 6; i++) {
+                const left = x - step * i;
+                const right = x + step * i;
+                if (left > segmentStart + 40 && !this.isInPit(left, pitRanges)) return left;
+                if (right < segmentEnd - 40 && !this.isInPit(right, pitRanges)) return right;
+            }
+            return x;
+        };
+        return {
+            segmentStart,
+            segmentEnd,
+            groundSurfaceY,
+            pitRanges,
+            nudgeOutOfPit
+        };
+    }
+
+    ensureGateForCurrent() {
+        const index = this.currentIndex ?? 0;
+        const objects = this.segmentObjects.get(index);
+        if (!objects) return;
+        if (!objects.levelGates.length) {
+            const placement = this.getSegmentPlacementData(index);
+            this.spawnGateForSegment(index, { objects, ...placement });
+        }
+        const gate = objects.levelGates[0];
+        if (!gate) return;
+        const locked = typeof this.scene?.isBossDefeated === 'function' ? !this.scene.isBossDefeated(index) : true;
+        gate.setData('locked', locked);
+        if (locked) gate.setTint(0x636e72);
+        else gate.clearTint();
+    }
+
+    ensureBossForCurrent() {
+        const index = this.currentIndex ?? 0;
+        const objects = this.segmentObjects.get(index);
+        if (!objects) return;
+        if (typeof this.scene?.isBossDefeated === 'function' && this.scene.isBossDefeated(index)) return;
+        const hasBoss = objects.enemies.some(enemy => enemy?.enemyKey === 'boss');
+        if (hasBoss) return;
+        const placement = this.getSegmentPlacementData(index);
+        this.spawnBossForSegment(index, { objects, ...placement });
+    }
+
+    spawnGateForSegment(index, context) {
+        const { objects, groundSurfaceY, segmentStart, nudgeOutOfPit } = context;
+        if (objects.levelGates.length) return;
+        const gateX = nudgeOutOfPit(segmentStart + this.config.segmentLength - 70);
+        const gateY = groundSurfaceY + 10;
+        const gate = this.pools.getLevelGate(gateX, gateY, index);
+        if (!gate) return;
+        if (!this.resolvePlacement(gate, [ ...objects.platforms, ...objects.movingPlatforms, ...objects.breakables, ...objects.springs, ...objects.hazards, ...objects.windGusts, ...objects.enemies, ...objects.pickups ], 6, 10, 2)) {
+            this.pools.releaseObject(gate, this.pools.levelGatePool);
+            return;
+        }
+        objects.levelGates.push(gate);
+    }
+
+    spawnBossForSegment(index, context) {
+        const { objects, groundSurfaceY, segmentStart, nudgeOutOfPit } = context;
+        const bossX = nudgeOutOfPit(segmentStart + this.config.segmentLength - 160);
+        const bossY = groundSurfaceY - 80;
+        const boss = this.pools.getBoss(bossX, bossY, index);
+        if (!boss) return;
+        if (!this.resolvePlacement(boss, [ ...objects.platforms, ...objects.movingPlatforms, ...objects.breakables, ...objects.springs, ...objects.hazards, ...objects.windGusts, ...objects.enemies, ...objects.pickups, ...objects.levelGates ], 6, 10, 2)) {
+            this.pools.releaseEnemy(boss);
+            return;
+        }
+        objects.enemies.push(boss);
     }
 
     spawnSegment(index) {
@@ -54,6 +152,7 @@ export default class SegmentManager {
             breakables: [],
             springs: [],
             hazards: [],
+            windGusts: [],
             enemies: [],
             pickups: [],
             checkpoints: [],
@@ -74,9 +173,10 @@ export default class SegmentManager {
         const breakableCount = clamp(budget.breakables * rules.breakableDensity * lengthScale, 0, 6);
         const springCount = clamp(budget.springs * rules.springDensity * lengthScale, 0, 6);
         const hazardCount = clamp(budget.hazards * rules.hazardDensity * lengthScale, 0, 6);
+        const windCount = clamp(budget.wind * rules.windDensity * lengthScale, 1, 10);
         const enemyMultiplier = this.config.enemyMultiplier ?? 1;
         const enemyCount = clamp(budget.enemies * rules.enemyDensity * enemyMultiplier, 2, 120);
-        const pickupCount = clamp(budget.pickups * rules.pickupDensity * lengthScale, 2, 10);
+        const pickupCount = clamp(budget.pickups * rules.pickupDensity * lengthScale, 1, 6);
 
         const layout = rules.layout;
         const heights = layout.heights;
@@ -249,11 +349,27 @@ export default class SegmentManager {
             if (this.isTooClose(gx, hy, objects.hazards, rules.minDistances.hazard)) continue;
             if (this.isTooClose(gx, hy, objects.enemies, rules.minDistances.hazard)) continue;
             const hazard = this.pools.getSpike(gx, hy);
-            if (!this.resolvePlacement(hazard, getBlockers(objects.platforms, objects.movingPlatforms, objects.breakables, objects.springs, objects.enemies, objects.pickups), 4, 8, 2)) {
+            if (!this.resolvePlacement(hazard, getBlockers(objects.platforms, objects.movingPlatforms, objects.breakables, objects.springs, objects.windGusts, objects.enemies, objects.pickups), 4, 8, 2)) {
                 this.pools.releaseObject(hazard, this.pools.spikePool);
                 continue;
             }
             objects.hazards.push(hazard);
+        }
+
+        for (let i = 0; i < windCount; i++) {
+            const zone = rules.windZone;
+            const wx = pickGroundXLoose(zoneCenter(zone) + (i - windCount * 0.5) * 60, layout.spread * rules.zoneSpread);
+            if (wx === null) continue;
+            if (this.isNearPath(wx, pathXs, rules.pathClearRadius)) continue;
+            if (this.isTooClose(wx, groundSurfaceY - 120, objects.windGusts, rules.minDistances.wind)) continue;
+            const scaleY = 2.2 + rng() * 2.6;
+            const boost = 650 + rng() * 220;
+            const gust = this.pools.getWindGust(wx, groundSurfaceY + 6, scaleY, boost);
+            if (!this.resolvePlacement(gust, getBlockers(objects.platforms, objects.movingPlatforms, objects.breakables, objects.springs, objects.hazards, objects.enemies, objects.pickups, objects.windGusts), 4, 8, 2)) {
+                this.pools.releaseObject(gust, this.pools.windGustPool);
+                continue;
+            }
+            objects.windGusts.push(gust);
         }
 
         for (let i = 0; i < enemyCount; i++) {
@@ -266,9 +382,9 @@ export default class SegmentManager {
             if (this.isNearPath(ex, pathXs, rules.pathClearRadius) && rng() > rules.enemyNearPathChance) continue;
             if (this.isTooClose(ex, ey, objects.enemies, rules.minDistances.enemy)) continue;
             if (this.isTooClose(ex, ey, objects.hazards, rules.minDistances.enemy)) continue;
-            const enemy = this.pools.spawnEnemy(biome, ex, ey, rng);
+            const enemy = this.pools.spawnEnemy(biome, ex, ey, rng, index);
             if (!enemy) continue;
-            if (!this.resolvePlacement(enemy, getBlockers(objects.platforms, objects.movingPlatforms, objects.breakables, objects.springs, objects.hazards, objects.enemies, objects.pickups), 6, 10, 2)) {
+            if (!this.resolvePlacement(enemy, getBlockers(objects.platforms, objects.movingPlatforms, objects.breakables, objects.springs, objects.hazards, objects.windGusts, objects.enemies, objects.pickups), 6, 10, 2)) {
                 this.pools.releaseEnemy(enemy);
                 continue;
             }
@@ -287,12 +403,12 @@ export default class SegmentManager {
             if (this.isTooClose(px, py, objects.enemies, rules.minDistances.pickup + 10)) continue;
             if (this.isTooClose(px, py, objects.hazards, rules.minDistances.pickup + 10)) continue;
             let pickup = null;
-            if (roll < 0.45) pickup = this.pools.getCoin(px, py);
-            else if (roll < 0.7) pickup = this.pools.getGem(px, py);
-            else if (roll < 0.86) pickup = this.pools.getPowerup(px, py, rng() > 0.5 ? 'feather' : 'sword_stone');
+            if (roll < 0.6) pickup = this.pools.getCoin(px, py);
+            else if (roll < 0.92) pickup = this.pools.getGem(px, py);
+            else if (roll < 0.98) pickup = this.pools.getPowerup(px, py, rng() > 0.5 ? 'feather' : 'sword_stone');
             else pickup = this.pools.getPowerup(px, py, rng() > 0.5 ? 'powerup_mushroom' : 'powerup_fire');
             if (!pickup) continue;
-            if (!this.resolvePlacement(pickup, getBlockers(objects.platforms, objects.movingPlatforms, objects.breakables, objects.springs, objects.hazards, objects.enemies, objects.pickups), 6, 10, 2)) {
+            if (!this.resolvePlacement(pickup, getBlockers(objects.platforms, objects.movingPlatforms, objects.breakables, objects.springs, objects.hazards, objects.windGusts, objects.enemies, objects.pickups), 6, 10, 2)) {
                 if (pickup.texture && pickup.texture.key === 'coin') this.pools.releaseObject(pickup, this.pools.coinPool);
                 else if (pickup.texture && pickup.texture.key === 'gem_icon') this.pools.releaseObject(pickup, this.pools.gemPool);
                 else this.pools.releasePowerup(pickup);
@@ -301,11 +417,11 @@ export default class SegmentManager {
             objects.pickups.push(pickup);
         }
 
-        if (rng() > 0.7) {
+        if (rng() > 0.9) {
             const base = platformPositions.length > 0 ? platformPositions[Math.floor(rng() * platformPositions.length)] : { x: pickGroundXLoose(segmentStart + this.config.segmentLength * 0.5, layout.spread * 2.5), y: groundSurfaceY - 140 };
             if (base && base.x !== null) {
             const orb = this.pools.getTimeOrb(base.x + (rng() - 0.5) * 12, base.y - 90);
-            if (orb && this.resolvePlacement(orb, getBlockers(objects.platforms, objects.movingPlatforms, objects.breakables, objects.springs, objects.hazards, objects.enemies, objects.pickups), 6, 10, 2)) {
+            if (orb && this.resolvePlacement(orb, getBlockers(objects.platforms, objects.movingPlatforms, objects.breakables, objects.springs, objects.hazards, objects.windGusts, objects.enemies, objects.pickups), 6, 10, 2)) {
                 objects.pickups.push(orb);
             } else if (orb) {
                 this.pools.releaseTimeOrb(orb);
@@ -313,11 +429,11 @@ export default class SegmentManager {
             }
         }
 
-        if (rng() > 0.75) {
+        if (rng() > 0.92) {
             const base = platformPositions.length > 0 ? platformPositions[Math.floor(rng() * platformPositions.length)] : { x: pickGroundXLoose(segmentStart + this.config.segmentLength * 0.5, layout.spread * 2.5), y: groundSurfaceY - 140 };
             if (base && base.x !== null) {
             const orb = this.pools.getMagnetOrb(base.x + (rng() - 0.5) * 12, base.y - 90);
-            if (orb && this.resolvePlacement(orb, getBlockers(objects.platforms, objects.movingPlatforms, objects.breakables, objects.springs, objects.hazards, objects.enemies, objects.pickups), 6, 10, 2)) {
+            if (orb && this.resolvePlacement(orb, getBlockers(objects.platforms, objects.movingPlatforms, objects.breakables, objects.springs, objects.hazards, objects.windGusts, objects.enemies, objects.pickups), 6, 10, 2)) {
                 objects.pickups.push(orb);
             } else if (orb) {
                 this.pools.releaseMagnetOrb(orb);
@@ -328,7 +444,7 @@ export default class SegmentManager {
         if (index % 5 === 0 || archetype === 'rest') {
             const checkpointX = nudgeOutOfPit(segmentStart + this.config.segmentLength - 80);
             const checkpoint = this.pools.getCheckpoint(checkpointX, groundSurfaceY - 50);
-            if (checkpoint && this.resolvePlacement(checkpoint, getBlockers(terrainTiles, objects.platforms, objects.movingPlatforms, objects.breakables, objects.springs, objects.hazards, objects.enemies, objects.pickups), 4, 10, 2)) {
+            if (checkpoint && this.resolvePlacement(checkpoint, getBlockers(terrainTiles, objects.platforms, objects.movingPlatforms, objects.breakables, objects.springs, objects.hazards, objects.windGusts, objects.enemies, objects.pickups), 4, 10, 2)) {
                 objects.checkpoints.push(checkpoint);
             } else if (checkpoint) {
                 this.pools.releaseObject(checkpoint, this.pools.checkpointPool);
@@ -339,7 +455,7 @@ export default class SegmentManager {
             const shopX = pickGroundXLoose(segmentStart + this.config.segmentLength * 0.5, layout.spread * 1.5);
             if (shopX !== null) {
                 const shop = this.pools.getShop(shopX, groundSurfaceY - 50);
-            if (shop && this.resolvePlacement(shop, getBlockers(terrainTiles, objects.platforms, objects.movingPlatforms, objects.breakables, objects.springs, objects.hazards, objects.enemies, objects.pickups, objects.checkpoints), 4, 10, 2)) {
+            if (shop && this.resolvePlacement(shop, getBlockers(terrainTiles, objects.platforms, objects.movingPlatforms, objects.breakables, objects.springs, objects.hazards, objects.windGusts, objects.enemies, objects.pickups, objects.checkpoints), 4, 10, 2)) {
                 objects.shops.push(shop);
             } else if (shop) {
                 this.pools.releaseObject(shop, this.pools.shopPool);
@@ -353,7 +469,7 @@ export default class SegmentManager {
                 // Skip if no safe ground spot this segment.
             } else {
             const npc = this.pools.getNpc(biome, base.x, base.y - 28);
-            if (npc && this.resolvePlacement(npc, getBlockers(terrainTiles, objects.platforms, objects.movingPlatforms, objects.breakables, objects.springs, objects.hazards, objects.enemies, objects.pickups, objects.checkpoints, objects.shops), 4, 10, 2)) {
+            if (npc && this.resolvePlacement(npc, getBlockers(terrainTiles, objects.platforms, objects.movingPlatforms, objects.breakables, objects.springs, objects.hazards, objects.windGusts, objects.enemies, objects.pickups, objects.checkpoints, objects.shops), 4, 10, 2)) {
                 objects.npcs.push(npc);
             } else if (npc) {
                 this.pools.releaseObject(npc, this.pools.npcPool);
@@ -361,18 +477,13 @@ export default class SegmentManager {
             }
         }
 
-        if (index === this.config.levelCount - 1) {
-            const boss = this.pools.getBoss(segmentStart + this.config.segmentLength * 0.6, groundSurfaceY - 80);
-            if (boss) objects.enemies.push(boss);
-        }
-
-        const gateX = nudgeOutOfPit(segmentStart + this.config.segmentLength - 60);
-        const gateY = groundSurfaceY;
-        const gate = this.pools.getLevelGate(gateX, gateY, index);
-        if (gate && this.resolvePlacement(gate, getBlockers(objects.platforms, objects.movingPlatforms, objects.breakables, objects.springs, objects.hazards, objects.enemies, objects.pickups, objects.checkpoints, objects.shops), 4, 10, 2)) {
-            objects.levelGates.push(gate);
-        } else if (gate) {
-            this.pools.releaseObject(gate, this.pools.levelGatePool);
+        if (index === this.currentIndex) {
+            this.spawnGateForSegment(index, {
+                objects,
+                groundSurfaceY,
+                getBlockers,
+                nudgeOutOfPit
+            });
         }
 
         if (rng() > 0.35) {
@@ -409,6 +520,7 @@ export default class SegmentManager {
             rng,
             biome,
             segmentStart,
+            levelIndex: index,
             groundSpawnY,
             layout,
             terrainTiles,
@@ -494,21 +606,22 @@ export default class SegmentManager {
             breakables: 4,
             springs: 3,
             hazards: 4,
+            wind: 4,
             enemies: 13,
             pickups: 7
         };
 
         if (type === 'gauntlet') {
-            return this.fitBudget({ ...base, hazards: 6, enemies: 18, pickups: 3, moving: 1, springs: 1 }, max);
+            return this.fitBudget({ ...base, hazards: 6, enemies: 18, pickups: 3, moving: 1, springs: 2, wind: 5 }, max);
         }
         if (type === 'treasure') {
-            return this.fitBudget({ ...base, hazards: 2, enemies: 6, pickups: 12, breakables: 6 }, max);
+            return this.fitBudget({ ...base, hazards: 2, enemies: 6, pickups: 10, breakables: 6, wind: 3 }, max);
         }
         if (type === 'rest') {
-            return this.fitBudget({ ...base, hazards: 1, enemies: 4, pickups: 9, moving: 0, springs: 2 }, max);
+            return this.fitBudget({ ...base, hazards: 1, enemies: 4, pickups: 6, moving: 0, springs: 3, wind: 4 }, max);
         }
         if (type === 'vertical') {
-            return this.fitBudget({ ...base, platforms: 30, springs: 6, moving: 0, hazards: 1, enemies: 5, pickups: 6 }, max);
+            return this.fitBudget({ ...base, platforms: 34, springs: 7, moving: 1, hazards: 2, enemies: 7, pickups: 5, wind: 7 }, max);
         }
         return this.fitBudget(base, max);
     }
@@ -517,7 +630,7 @@ export default class SegmentManager {
         const skyHeights = this.getSkyHeights(groundSurfaceY);
         if (type === 'vertical') {
             return {
-                heights: skyHeights.slice(0, 6),
+                heights: skyHeights.slice(0, 7),
                 sideY: (i) => skyHeights[Math.min(i, skyHeights.length - 1)] ?? groundSurfaceY - 120,
                 minGap: 80,
                 spread: 50,
@@ -526,7 +639,7 @@ export default class SegmentManager {
         }
         if (type === 'gauntlet') {
             return {
-                heights: skyHeights.slice(0, 3),
+                heights: skyHeights.slice(0, 4),
                 sideY: () => skyHeights[Math.min(1, skyHeights.length - 1)] ?? groundSurfaceY - 120,
                 minGap: 70,
                 spread: 80,
@@ -535,7 +648,7 @@ export default class SegmentManager {
         }
         if (type === 'treasure') {
             return {
-                heights: skyHeights.slice(0, 4),
+                heights: skyHeights.slice(0, 5),
                 sideY: () => skyHeights[Math.min(2, skyHeights.length - 1)] ?? groundSurfaceY - 200,
                 minGap: 60,
                 spread: 70,
@@ -544,7 +657,7 @@ export default class SegmentManager {
         }
         if (type === 'rest') {
             return {
-                heights: skyHeights.slice(0, 3),
+                heights: skyHeights.slice(0, 4),
                 sideY: () => skyHeights[Math.min(1, skyHeights.length - 1)] ?? groundSurfaceY - 120,
                 minGap: 80,
                 spread: 60,
@@ -553,8 +666,8 @@ export default class SegmentManager {
         }
         // traversal (Mario-style steps)
         return {
-            heights: skyHeights.slice(0, 4),
-            sideY: (i) => skyHeights[Math.min(i % 4, skyHeights.length - 1)] ?? groundSurfaceY - 160,
+            heights: skyHeights.slice(0, 5),
+            sideY: (i) => skyHeights[Math.min(i % 5, skyHeights.length - 1)] ?? groundSurfaceY - 160,
             minGap: 60,
             spread: 70,
             sideSpread: 35
@@ -564,76 +677,82 @@ export default class SegmentManager {
     getRules(type, biome, groundSurfaceY) {
         const base = {
             layout: this.getLayout(type, groundSurfaceY),
-            platformDensity: 1,
-            movingDensity: 1,
-            breakableDensity: 1,
-            springDensity: 1,
-            hazardDensity: 1,
-            enemyDensity: 1,
-            pickupDensity: 1,
-            pathClearRadius: 80,
-            springAvoidPathRadius: 60,
-            enemyNearPathChance: 0.5,
-            enemyOnPlatformChance: 0.6,
-            pickupOnPlatformChance: 0.8,
+            platformDensity: 1.3,
+            movingDensity: 1.1,
+            breakableDensity: 1.4,
+            springDensity: 1.4,
+            hazardDensity: 1.3,
+            windDensity: 1.7,
+            enemyDensity: 1.5,
+            pickupDensity: 0.5,
+            pathClearRadius: 70,
+            springAvoidPathRadius: 50,
+            enemyNearPathChance: 0.7,
+            enemyOnPlatformChance: 0.7,
+            pickupOnPlatformChance: 0.5,
             hazardZone: 'mid',
-            enemyZones: ['mid', 'exit'],
-            pickupZones: ['mid', 'exit'],
+            windZone: 'mid',
+            enemyZones: ['entry', 'mid', 'exit'],
+            pickupZones: ['exit'],
             zoneSpread: 1.2,
-            minPlatformGap: 70,
-            minDistances: { enemy: 80, hazard: 60, pickup: 55 }
+            minPlatformGap: 60,
+            minDistances: { enemy: 75, hazard: 55, pickup: 70, wind: 80 }
         };
 
         let rules = { ...base };
 
         if (type === 'rest') {
             rules = { ...base,
-                hazardDensity: 0.2,
-                enemyDensity: 0.3,
-                pickupDensity: 1.2,
-                pathClearRadius: 120,
-                springAvoidPathRadius: 90,
-                enemyNearPathChance: 0.2,
-                enemyZones: ['exit'],
-                pickupZones: ['entry', 'exit'],
+                hazardDensity: 0.5,
+                enemyDensity: 0.6,
+                pickupDensity: 0.7,
+                windDensity: 1.2,
+                pathClearRadius: 100,
+                springAvoidPathRadius: 70,
+                enemyNearPathChance: 0.4,
+                enemyZones: ['mid', 'exit'],
+                pickupZones: ['exit'],
                 zoneSpread: 1,
-                minPlatformGap: 80
+                minPlatformGap: 70
             };
         } else if (type === 'treasure') {
             rules = { ...base,
-                hazardDensity: 0.4,
-                enemyDensity: 0.6,
-                pickupDensity: 1.4,
-                enemyNearPathChance: 0.4,
-                pickupZones: ['mid', 'exit', 'exit'],
-                zoneSpread: 1.3
+                hazardDensity: 0.7,
+                enemyDensity: 0.9,
+                pickupDensity: 0.8,
+                windDensity: 1.4,
+                enemyNearPathChance: 0.6,
+                pickupZones: ['exit'],
+                zoneSpread: 1.2
             };
         } else if (type === 'gauntlet') {
             rules = { ...base,
-                hazardDensity: 1.2,
-                enemyDensity: 1.3,
-                pickupDensity: 0.6,
-                pathClearRadius: 70,
-                enemyNearPathChance: 0.8,
-                enemyZones: ['mid', 'mid', 'exit'],
+                hazardDensity: 1.4,
+                enemyDensity: 1.7,
+                pickupDensity: 0.3,
+                windDensity: 1.8,
+                pathClearRadius: 60,
+                enemyNearPathChance: 0.9,
+                enemyZones: ['entry', 'mid', 'exit'],
                 pickupZones: ['exit'],
                 zoneSpread: 1.4,
-                minPlatformGap: 60
+                minPlatformGap: 55
             };
         } else if (type === 'vertical') {
             rules = { ...base,
-                movingDensity: 0.5,
-                hazardDensity: 0.4,
-                enemyDensity: 0.6,
-                pickupDensity: 0.9,
-                pathClearRadius: 90,
-                springAvoidPathRadius: 70,
-                enemyOnPlatformChance: 0.8,
-                pickupOnPlatformChance: 0.9,
+                movingDensity: 0.8,
+                hazardDensity: 0.8,
+                enemyDensity: 1.1,
+                pickupDensity: 0.4,
+                windDensity: 2.1,
+                pathClearRadius: 80,
+                springAvoidPathRadius: 55,
+                enemyOnPlatformChance: 0.85,
+                pickupOnPlatformChance: 0.6,
                 enemyZones: ['mid', 'exit'],
-                pickupZones: ['mid', 'exit'],
+                pickupZones: ['exit'],
                 zoneSpread: 1.1,
-                minPlatformGap: 80
+                minPlatformGap: 65
             };
         }
 
@@ -648,9 +767,9 @@ export default class SegmentManager {
 
     getSkyHeights(groundSurfaceY) {
         const skyHeight = this.config.skyHeight ?? 320;
-        const step = Math.max(140, Math.round(skyHeight / 7));
+        const step = Math.max(120, Math.round(skyHeight / 9));
         const heights = [];
-        for (let i = 1; i <= 8; i++) {
+        for (let i = 1; i <= 10; i++) {
             const candidate = groundSurfaceY - i * step;
             if (candidate > 60) heights.push(candidate);
         }
@@ -658,7 +777,7 @@ export default class SegmentManager {
     }
 
     fitBudget(budget, max) {
-        const keys = ['platforms', 'moving', 'breakables', 'springs', 'hazards', 'enemies', 'pickups'];
+        const keys = ['platforms', 'moving', 'breakables', 'springs', 'hazards', 'wind', 'enemies', 'pickups'];
         let total = keys.reduce((sum, key) => sum + budget[key], 0);
         while (total > max && budget.enemies > 4) {
             budget.enemies -= 1;
@@ -670,6 +789,10 @@ export default class SegmentManager {
         }
         while (total > max && budget.hazards > 2) {
             budget.hazards -= 1;
+            total -= 1;
+        }
+        while (total > max && budget.wind > 2) {
+            budget.wind -= 1;
             total -= 1;
         }
         return budget;
@@ -693,6 +816,7 @@ export default class SegmentManager {
         objects.breakables.forEach(obj => this.pools.releaseObject(obj, this.pools.breakablePool));
         objects.springs.forEach(obj => this.pools.releaseObject(obj, this.pools.springPool));
         objects.hazards.forEach(obj => this.pools.releaseObject(obj, this.pools.spikePool));
+        objects.windGusts.forEach(obj => this.pools.releaseObject(obj, this.pools.windGustPool));
         objects.enemies.forEach(obj => this.pools.releaseEnemy(obj));
         objects.pickups.forEach(obj => {
             if (obj.texture && obj.texture.key === 'coin') this.pools.releaseObject(obj, this.pools.coinPool);
@@ -745,7 +869,7 @@ export default class SegmentManager {
                 if (gx === null || isInPit(gx)) return;
                 const hy = groundSurfaceY - 32;
                 const spike = this.pools.getSpike(gx, hy);
-                if (spike && this.resolvePlacement(spike, getBlockers(objects.platforms, objects.movingPlatforms, objects.breakables, objects.springs, objects.enemies, objects.pickups), 4, 8, 2)) {
+                if (spike && this.resolvePlacement(spike, getBlockers(objects.platforms, objects.movingPlatforms, objects.breakables, objects.springs, objects.windGusts, objects.enemies, objects.pickups), 4, 8, 2)) {
                     objects.hazards.push(spike);
                 } else if (spike) {
                     this.pools.releaseObject(spike, this.pools.spikePool);
@@ -756,7 +880,7 @@ export default class SegmentManager {
                 const sx = pickGroundXLoose(segmentStart + this.config.segmentLength * 0.45, layout.spread * 1.2);
                 if (sx === null || isInPit(sx)) return;
                 const spring = this.pools.getSpring(sx, groundSurfaceY - 10);
-                if (spring && this.resolvePlacement(spring, getBlockers(objects.platforms, objects.movingPlatforms, objects.breakables, objects.springs, objects.hazards, objects.enemies, objects.pickups), 4, 8, 2)) {
+                if (spring && this.resolvePlacement(spring, getBlockers(objects.platforms, objects.movingPlatforms, objects.breakables, objects.springs, objects.hazards, objects.windGusts, objects.enemies, objects.pickups), 4, 8, 2)) {
                     objects.springs.push(spring);
                 } else if (spring) {
                     this.pools.releaseObject(spring, this.pools.springPool);
@@ -768,7 +892,7 @@ export default class SegmentManager {
                 if (mx === null) return;
                 const baseY = groundSurfaceY - 140;
                 const mp = this.pools.getMovingPlatform(mx, baseY);
-                if (mp && this.resolvePlacement(mp, getBlockers(objects.platforms, objects.movingPlatforms, objects.breakables, objects.springs), 6, 8, 2)) {
+                if (mp && this.resolvePlacement(mp, getBlockers(objects.platforms, objects.movingPlatforms, objects.breakables, objects.springs, objects.windGusts), 6, 8, 2)) {
                     const travel = 120 + rng() * 80;
                     const duration = 1200 + rng() * 800;
                     mp.setData('tween', this.scene.tweens.add({
@@ -790,7 +914,7 @@ export default class SegmentManager {
                 const bx = nudgeOutOfPit(segmentStart + this.config.segmentLength * 0.6);
                 const by = groundSurfaceY - 60;
                 const block = this.pools.getBreakableBlock(bx, by, tilesetKey, breakableFrame, tileScale);
-                if (block && this.resolvePlacement(block, getBlockers(objects.platforms, objects.movingPlatforms, objects.breakables), 6, 8, 2)) {
+                if (block && this.resolvePlacement(block, getBlockers(objects.platforms, objects.movingPlatforms, objects.breakables, objects.windGusts), 6, 8, 2)) {
                     objects.breakables.push(block);
                 } else if (block) {
                     this.pools.releaseObject(block, this.pools.breakablePool);
@@ -801,7 +925,7 @@ export default class SegmentManager {
                 const ox = pickGroundXLoose(segmentStart + this.config.segmentLength * 0.35, layout.spread * 1.4);
                 if (ox === null) return;
                 const orb = this.pools.getTimeOrb(ox, groundSpawnY - 120);
-                if (orb && this.resolvePlacement(orb, getBlockers(objects.platforms, objects.movingPlatforms, objects.breakables, objects.springs, objects.hazards, objects.enemies, objects.pickups), 6, 10, 2)) {
+                if (orb && this.resolvePlacement(orb, getBlockers(objects.platforms, objects.movingPlatforms, objects.breakables, objects.springs, objects.hazards, objects.windGusts, objects.enemies, objects.pickups), 6, 10, 2)) {
                     objects.pickups.push(orb);
                 } else if (orb) {
                     this.pools.releaseTimeOrb(orb);
@@ -812,10 +936,21 @@ export default class SegmentManager {
                 const ox = pickGroundXLoose(segmentStart + this.config.segmentLength * 0.7, layout.spread * 1.4);
                 if (ox === null) return;
                 const orb = this.pools.getMagnetOrb(ox, groundSpawnY - 120);
-                if (orb && this.resolvePlacement(orb, getBlockers(objects.platforms, objects.movingPlatforms, objects.breakables, objects.springs, objects.hazards, objects.enemies, objects.pickups), 6, 10, 2)) {
+                if (orb && this.resolvePlacement(orb, getBlockers(objects.platforms, objects.movingPlatforms, objects.breakables, objects.springs, objects.hazards, objects.windGusts, objects.enemies, objects.pickups), 6, 10, 2)) {
                     objects.pickups.push(orb);
                 } else if (orb) {
                     this.pools.releaseMagnetOrb(orb);
+                }
+            }
+
+            if (feature === 'windGusts' && objects.windGusts.length === 0) {
+                const wx = pickGroundXLoose(segmentStart + this.config.segmentLength * 0.5, layout.spread * 1.6);
+                if (wx === null) return;
+                const gust = this.pools.getWindGust(wx, groundSurfaceY + 6, 3.2, 720);
+                if (gust && this.resolvePlacement(gust, getBlockers(objects.platforms, objects.movingPlatforms, objects.breakables, objects.springs, objects.hazards, objects.enemies, objects.pickups, objects.windGusts), 4, 8, 2)) {
+                    objects.windGusts.push(gust);
+                } else if (gust) {
+                    this.pools.releaseObject(gust, this.pools.windGustPool);
                 }
             }
         });
@@ -827,6 +962,7 @@ export default class SegmentManager {
             rng,
             biome,
             segmentStart,
+            levelIndex,
             groundSpawnY,
             layout,
             terrainTiles,
@@ -842,14 +978,14 @@ export default class SegmentManager {
         const ey = groundSpawnY;
         let enemy = null;
         if (biome === 'aquatic') {
-            enemy = this.pools.getFlyingEnemy('jellyfish', ex, ey - 140);
+            enemy = this.pools.getFlyingEnemy('jellyfish', ex, ey - 140, levelIndex);
         } else if (biome === 'fungal') {
-            enemy = this.pools.getEnemy(rng() > 0.5 ? 'mushroom' : 'frog', ex, ey);
+            enemy = this.pools.getEnemy(rng() > 0.5 ? 'mushroom' : 'frog', ex, ey, levelIndex);
         } else {
-            enemy = this.pools.getEnemy(rng() > 0.5 ? 'mushroom' : 'turtle', ex, ey);
+            enemy = this.pools.getEnemy(rng() > 0.5 ? 'mushroom' : 'turtle', ex, ey, levelIndex);
         }
         if (!enemy) return;
-        if (!this.resolvePlacement(enemy, getBlockers(objects.platforms, objects.movingPlatforms, objects.breakables, objects.springs, objects.hazards, objects.pickups), 6, 10, 2)) {
+        if (!this.resolvePlacement(enemy, getBlockers(objects.platforms, objects.movingPlatforms, objects.breakables, objects.springs, objects.hazards, objects.windGusts, objects.pickups), 6, 10, 2)) {
             this.pools.releaseEnemy(enemy);
             return;
         }

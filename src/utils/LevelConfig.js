@@ -7,7 +7,8 @@ const REQUIRED_FEATURES = [
     'movingPlatforms',
     'breakables',
     'timeOrbs',
-    'magnetOrbs'
+    'magnetOrbs',
+    'windGusts'
 ];
 
 const buildBiomePlan = (levelCount, rng) => {
@@ -21,11 +22,9 @@ const buildBiomePlan = (levelCount, rng) => {
 
 const buildRequiredFeaturePlan = (levelCount, rng) => {
     const plan = {};
-    REQUIRED_FEATURES.forEach((feature) => {
-        const index = Math.floor(rng() * levelCount);
-        if (!plan[index]) plan[index] = [];
-        plan[index].push(feature);
-    });
+    for (let i = 0; i < levelCount; i++) {
+        plan[i] = [...REQUIRED_FEATURES];
+    }
     return plan;
 };
 

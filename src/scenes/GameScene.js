@@ -51,6 +51,10 @@ export default class GameScene extends Phaser.Scene {
         graphics.beginPath(); graphics.moveTo(0, 32); graphics.lineTo(16, 0); graphics.lineTo(32, 32); graphics.closePath(); graphics.fillPath(); graphics.strokePath();
         graphics.generateTexture('spikes', 32, 32); graphics.clear();
 
+        graphics.fillStyle(0x74b9ff, 0.25); graphics.fillRect(8, 0, 16, 64);
+        graphics.fillStyle(0xffffff, 0.4); graphics.fillRect(12, 8, 8, 48);
+        graphics.generateTexture('wind_gust', 32, 64); graphics.clear();
+
         graphics.fillStyle(0x2ecc71); graphics.fillRect(0, 0, 32, 24);
         graphics.fillStyle(0x7f8c8d); graphics.fillRect(0, 0, 4, 64);
         graphics.generateTexture('flag', 32, 64); graphics.clear();
@@ -99,10 +103,10 @@ export default class GameScene extends Phaser.Scene {
             levelCount: 40,
             segmentLength: 210,
             gapLength: 30,
-            maxOnScreen: 120,
+            maxOnScreen: 160,
             levelHeight: 3000,
             groundY: 2500,
-            skyHeight: 1800,
+            skyHeight: 2100,
             enemyMultiplier: 5
         });
         this.worldGenerator = new WorldGenerator(this, this.levelConfig);
@@ -136,6 +140,7 @@ export default class GameScene extends Phaser.Scene {
         this.timeOrbs = this.physics.add.group({ allowGravity: false });
         this.magnetOrbs = this.physics.add.group({ allowGravity: false });
         this.springs = this.physics.add.staticGroup();
+        this.windGusts = this.physics.add.staticGroup();
         this.breakableBlocks = this.physics.add.staticGroup();
         this.shops = this.physics.add.staticGroup();
         this.npcs = this.physics.add.staticGroup();
@@ -166,12 +171,14 @@ export default class GameScene extends Phaser.Scene {
         this.questState = {};
         this.activeBuffs = {};
         this.currentLevelIndex = 0;
+        this.defeatedBossLevels = new Set();
+        this.nextGateHintAt = 0;
         this.magnetUntil = 0; this.magnetRadius = 220; this.magnetSpeed = 320;
         this.magnetRadiusBoost = 0;
         this.timeSlowUntil = 0; this.timeSlowFactor = 0.6;
         this.coinCombo = 0; this.lastCoinAt = 0;
         this.weatherSystem = new WeatherSystem(this);
-        this.events.on('boss-defeated', (boss) => this.spawnBossRewards(boss));
+        this.events.on('boss-defeated', (boss) => this.handleBossDefeated(boss));
         this.setupHUD();
         this.loadData();
     }
@@ -203,15 +210,14 @@ export default class GameScene extends Phaser.Scene {
         this.physics.add.overlap(this.player, this.gems, this.collectGem, null, this);
         this.physics.add.overlap(this.player, this.coins, this.collectCoin, null, this);
         this.physics.add.overlap(this.player, this.springs, this.useSpring, null, this);
+        this.physics.add.overlap(this.player, this.windGusts, this.useWindGust, null, this);
         this.physics.add.overlap(this.player, this.shops, this.enterShop, null, this);
         this.physics.add.overlap(this.player, this.levelGates, this.completeLevel, null, this);
 
         // Turtle interaction
         this.physics.add.overlap(this.turtles, enemyGroups, (shell, enemy) => {
             if (shell.isShell && shell.isMoving && shell !== enemy) {
-                if (enemy instanceof Boss) enemy.takeDamage();
-                else { this.smokeEmitter.explode(10, enemy.x, enemy.y); enemy.destroy(); }
-                this.addScore(200);
+                this.damageEnemy(enemy, 200);
             }
         }, null, this);
     }
@@ -359,13 +365,14 @@ export default class GameScene extends Phaser.Scene {
         const range = isStone ? 100 : 60; 
         const h = this.add.rectangle(this.player.x + (this.player.flipX ? 1 : -1) * range/2, this.player.y, range, isStone ? 60 : 40, 0xffff00, 0);
         this.physics.add.existing(h); 
-        
+        h.setData('hitTargets', new Set());
         const enemyGroups = [this.mushrooms, this.frogs, this.turtles, this.bosses, this.birds, this.jellyfish];
         enemyGroups.forEach(g => {
             this.physics.add.overlap(h, g, (hi, enemy) => { 
-                this.addScore(100); 
-                if (enemy instanceof Boss) enemy.takeDamage(); 
-                else { this.smokeEmitter.explode(10, enemy.x, enemy.y); enemy.destroy(); } 
+                const hitTargets = h.getData('hitTargets');
+                if (hitTargets && hitTargets.has(enemy)) return;
+                if (hitTargets) hitTargets.add(enemy);
+                this.damageEnemy(enemy, 100);
             });
         });
         this.time.delayedCall(150, () => h.destroy());
@@ -378,9 +385,21 @@ export default class GameScene extends Phaser.Scene {
 
     fireballHit(fb, enemy) { 
         fb.destroy(); 
-        if (enemy instanceof Boss) enemy.takeDamage(); 
-        else { this.smokeEmitter.explode(10, enemy.x, enemy.y); enemy.destroy(); } 
-        this.addScore(150); 
+        this.damageEnemy(enemy, 150);
+    }
+
+    damageEnemy(enemy, points = 100) {
+        if (!enemy || !enemy.active) return false;
+        const ex = enemy.x;
+        const ey = enemy.y;
+        let destroyed = false;
+        if (enemy.takeDamage) destroyed = enemy.takeDamage();
+        else { enemy.destroy(); destroyed = true; }
+        this.addScore(points);
+        if (destroyed && !(enemy instanceof Boss)) {
+            this.smokeEmitter.explode(12, ex, ey);
+        }
+        return destroyed;
     }
 
     hitEnemy(p, enemy) {
@@ -391,11 +410,8 @@ export default class GameScene extends Phaser.Scene {
             return; 
         }
         if (p.body.touching.down && p.y < enemy.y - 10) { 
-            this.smokeEmitter.explode(15, enemy.x, enemy.y); 
-            if (enemy instanceof Turtle) enemy.handleStomp();
-            else if (enemy instanceof Boss) enemy.takeDamage();
-            else enemy.destroy(); 
-            p.setVelocityY(-450); this.addScore(50); 
+            this.damageEnemy(enemy, 50);
+            p.setVelocityY(-450); 
         }
         else this.player.state !== 'SMALL' ? this.player.shrink() : this.die();
     }
@@ -427,6 +443,15 @@ export default class GameScene extends Phaser.Scene {
         this.addScore(10 * this.coinCombo);
     }
     useSpring(p, s) { p.setVelocityY(-1000); this.tweens.add({ targets: s, scaleY: 0.5, duration: 50, yoyo: true }); }
+    useWindGust(p, gust) {
+        const now = this.time.now;
+        const cooldownUntil = gust.getData('cooldownUntil') || 0;
+        if (now < cooldownUntil) return;
+        const boost = gust.getData('boost') || 700;
+        p.setVelocityY(-boost);
+        gust.setData('cooldownUntil', now + 500);
+        this.tweens.add({ targets: gust, scaleY: gust.scaleY * 0.9, duration: 80, yoyo: true });
+    }
     enterShop(p, s) { this.shopInRange = s; }
     updateShopPrompt(time) {
         if (this.getNearestQuestNpcInRange()) {
@@ -748,6 +773,25 @@ export default class GameScene extends Phaser.Scene {
     }
     
     winGame() { if (this.isWinning) return; this.isWinning = true; this.saveData(); this.physics.pause(); this.add.text(400, 300, 'VICTORY!', { fontSize: '84px', fill: '#f1c40f' }).setOrigin(0.5).setScrollFactor(0); this.time.delayedCall(5000, () => { this.isWinning = false; this.scene.start('MenuScene'); }); }
+    isBossDefeated(levelIndex) {
+        return this.defeatedBossLevels.has(levelIndex);
+    }
+    handleBossDefeated(boss) {
+        this.spawnBossRewards(boss);
+        const storedIndex = boss.getData('levelIndex');
+        const levelIndex = Number.isFinite(storedIndex) ? storedIndex : getLevelIndexForX(boss.x, this.levelConfig);
+        this.defeatedBossLevels.add(levelIndex);
+        this.unlockGateForLevel(levelIndex);
+        this.showLevelMessage('BOSS DOWN - GRAB THE FLAG');
+        this.saveData();
+    }
+    unlockGateForLevel(levelIndex) {
+        this.levelGates.getChildren().forEach((gate) => {
+            if (gate.getData('levelIndex') !== levelIndex) return;
+            gate.setData('locked', false);
+            gate.clearTint();
+        });
+    }
     spawnBossRewards(boss) {
         const pools = this.worldGenerator?.pools;
         if (!pools || !boss) return;
@@ -764,6 +808,14 @@ export default class GameScene extends Phaser.Scene {
         const gateIndex = gate.getData('levelIndex');
         if (gateIndex === undefined || gateIndex === null) return;
         if (gateIndex !== this.currentLevelIndex) return;
+        if (!this.isBossDefeated(gateIndex)) {
+            const now = this.time.now;
+            if (now > this.nextGateHintAt) {
+                this.showLevelMessage('DEFEAT THE BOSS');
+                this.nextGateHintAt = now + 1200;
+            }
+            return;
+        }
         const lastIndex = this.levelConfig.levelCount - 1;
         if (gateIndex >= lastIndex) {
             this.winGame();
@@ -791,7 +843,8 @@ export default class GameScene extends Phaser.Scene {
             upgrades: this.player.upgrades,
             questState: this.questState,
             currentLevelIndex: this.currentLevelIndex,
-            reserveType: this.reserveType
+            reserveType: this.reserveType,
+            defeatedBossLevels: Array.from(this.defeatedBossLevels)
         }));
     }
     loadData() {
@@ -804,6 +857,9 @@ export default class GameScene extends Phaser.Scene {
             if (data.upgrades) this.player.upgrades = data.upgrades;
             if (data.questState) this.questState = data.questState;
             if (typeof data.currentLevelIndex === 'number') this.currentLevelIndex = data.currentLevelIndex;
+            if (Array.isArray(data.defeatedBossLevels)) {
+                this.defeatedBossLevels = new Set(data.defeatedBossLevels);
+            }
             if (data.reserveType) {
                 this.reserveType = data.reserveType;
                 this.reserveIcon.setTexture(this.reserveType).setVisible(true).setScale(1.5);
