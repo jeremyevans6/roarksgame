@@ -13,6 +13,7 @@ export default class ObjectPools {
         this.gemPool = [];
         this.timeOrbPool = [];
         this.magnetOrbPool = [];
+        this.windGustPool = [];
         this.checkpointPool = [];
         this.shopPool = [];
         this.npcPool = [];
@@ -150,6 +151,20 @@ export default class ObjectPools {
         return orb;
     }
 
+    getWindGust(x, y, scaleY = 3, boost = 700) {
+        const gust = this.takeFromPool(this.windGustPool) || this.scene.windGusts.create(x, y, 'wind_gust');
+        gust.setActive(true).setVisible(true);
+        gust.setPosition(x, y);
+        gust.setOrigin(0.5, 1);
+        gust.setScale(1.6, scaleY);
+        gust.setAlpha(0.7);
+        gust.setData('boost', boost);
+        gust.setData('cooldownUntil', 0);
+        if (gust.body) gust.body.enable = true;
+        gust.refreshBody();
+        return gust;
+    }
+
     getCheckpoint(x, y) {
         const checkpoint = this.takeFromPool(this.checkpointPool) || this.scene.checkpoints.create(x, y, 'flag');
         checkpoint.setActive(true).setVisible(true);
@@ -208,23 +223,24 @@ export default class ObjectPools {
         return gate;
     }
 
-    spawnEnemy(biome, x, y, rng) {
+    spawnEnemy(biome, x, y, rng, levelIndex = 0) {
         if (biome === 'aquatic') {
+            const roll = rng();
             const flyY = Number.isFinite(y) ? y - 160 : 220;
-            return this.getFlyingEnemy('jellyfish', x, flyY);
+            return roll < 0.7 ? this.getFlyingEnemy('jellyfish', x, flyY, levelIndex) : this.getFlyingEnemy('bird', x, flyY, levelIndex);
         }
         if (biome === 'fungal') {
-            return rng() < 0.5 ? this.getEnemy('mushroom', x, y) : this.getEnemy('frog', x, y);
+            return rng() < 0.5 ? this.getEnemy('mushroom', x, y, levelIndex) : this.getEnemy('frog', x, y, levelIndex);
         }
         const roll = rng();
-        if (roll < 0.4) return this.getEnemy('mushroom', x, y);
-        if (roll < 0.7) return this.getEnemy('frog', x, y);
-        if (roll < 0.9) return this.getEnemy('turtle', x, y);
+        if (roll < 0.3) return this.getEnemy('mushroom', x, y, levelIndex);
+        if (roll < 0.55) return this.getEnemy('frog', x, y, levelIndex);
+        if (roll < 0.8) return this.getEnemy('turtle', x, y, levelIndex);
         const flyY = Number.isFinite(y) ? y - 160 : 180 + rng() * 120;
-        return this.getFlyingEnemy('bird', x, flyY);
+        return this.getFlyingEnemy('bird', x, flyY, levelIndex);
     }
 
-    getBoss(x, y) {
+    getBoss(x, y, levelIndex = 0) {
         const pool = this.enemyPools.boss;
         let boss = null;
         while (pool.length > 0 && !boss) {
@@ -238,13 +254,14 @@ export default class ObjectPools {
         boss.setActive(true).setVisible(true);
         boss.setPosition(x, y);
         if (boss.body) boss.body.enable = true;
-        boss.setVelocityX(-50);
+        this.applyEnemyDifficulty(boss, 'boss', levelIndex);
         boss.clearTint();
-        boss.health = 5;
+        boss.health = boss.maxHealth;
+        boss.setData('levelIndex', levelIndex);
         return boss;
     }
 
-    getEnemy(type, x, y) {
+    getEnemy(type, x, y, levelIndex = 0) {
         const pool = this.enemyPools[type];
         if (!pool) return null;
         let enemy = null;
@@ -264,27 +281,25 @@ export default class ObjectPools {
         enemy.setPosition(x, y);
         if (enemy.body) enemy.body.enable = true;
         enemy.clearTint();
-        const setVelocityX = (value) => {
-            if (enemy.setVelocityX) enemy.setVelocityX(value);
-            else if (enemy.body && enemy.body.setVelocityX) enemy.body.setVelocityX(value);
-        };
+        this.applyEnemyDifficulty(enemy, type, levelIndex);
         if (type === 'mushroom') {
-            setVelocityX(-100);
+            enemy.setVelocityX(-enemy.patrolSpeed);
         } else if (type === 'frog') {
             enemy.nextJump = 0;
-            setVelocityX(-100);
+            enemy.setVelocityX(-enemy.patrolSpeed);
             if (enemy.setBounce) enemy.setBounce(1, 0);
         } else if (type === 'turtle') {
             enemy.isShell = false;
             enemy.isMoving = false;
-            setVelocityX(-100);
+            enemy.setVelocityX(-enemy.patrolSpeed);
             if (enemy.setBodySize) enemy.setBodySize(20, 24);
             if (enemy.setOffset) enemy.setOffset(6, 8);
         }
+        enemy.setData('levelIndex', levelIndex);
         return enemy;
     }
 
-    getFlyingEnemy(type, x, y) {
+    getFlyingEnemy(type, x, y, levelIndex = 0) {
         const pool = this.enemyPools[type];
         if (!pool) return null;
         let enemy = null;
@@ -303,9 +318,32 @@ export default class ObjectPools {
             enemy.body.enable = true;
             enemy.body.setAllowGravity(false);
         }
+        this.applyEnemyDifficulty(enemy, type, levelIndex);
         enemy.startY = y;
-        enemy.setVelocityX(type === 'jellyfish' ? -50 : -150);
+        enemy.setVelocityX(-enemy.patrolSpeed);
+        enemy.setData('levelIndex', levelIndex);
         return enemy;
+    }
+
+    applyEnemyDifficulty(enemy, type, levelIndex = 0) {
+        if (!enemy) return;
+        const baseStats = {
+            mushroom: { speed: 100, health: 1 },
+            frog: { speed: 100, jumpSpeed: 150, health: 1 },
+            turtle: { speed: 100, health: 1 },
+            bird: { speed: 150, health: 1 },
+            jellyfish: { speed: 50, health: 1 },
+            boss: { speed: 50, health: 5 }
+        };
+        const stats = baseStats[type] || baseStats.mushroom;
+        const speedMultiplier = 1 + levelIndex * 0.05;
+        enemy.speedMultiplier = speedMultiplier;
+        enemy.baseHealth = stats.health;
+        enemy.maxHealth = stats.health + levelIndex;
+        enemy.health = enemy.maxHealth;
+        enemy.patrolSpeed = stats.speed * speedMultiplier;
+        if (type === 'frog') enemy.leapSpeed = (stats.jumpSpeed || 150) * speedMultiplier;
+        if (type === 'boss') enemy.jumpPower = 600 + levelIndex * 8;
     }
 
     releaseObject(obj, pool) {
