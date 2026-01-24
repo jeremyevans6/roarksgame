@@ -19,6 +19,12 @@ export default class TileEditorPanel {
         this.selectedName = null;
         this.spritesheetImage = null;
         this.scale = 2;
+        this.requiredSelections = [
+            'ground_top',
+            'ground_fill',
+            'platform_top',
+            'breakable_block'
+        ];
     }
 
     mount() {
@@ -83,6 +89,7 @@ export default class TileEditorPanel {
 
         this.renderTabs();
         this.loadTilesetImage();
+        this.ensureRequiredSelections();
         this.renderSelections();
         this.renderGroundMapping();
         this.initializeStore();
@@ -106,12 +113,14 @@ export default class TileEditorPanel {
         try {
             this.store = await createTileSelectionStore();
             this.data = this.store.data;
+            this.ensureRequiredSelections();
             this.renderSelections();
             this.renderGroundMapping();
             this.drawTileset();
             this.setStatus('SQLite ready.');
         } catch (err) {
             this.data = loadTileSelections();
+            this.ensureRequiredSelections();
             this.setStatus('SQLite unavailable, using local cache.');
         }
     }
@@ -128,6 +137,7 @@ export default class TileEditorPanel {
                 this.selectedName = null;
                 this.renderTabs();
                 this.loadTilesetImage();
+                this.ensureRequiredSelections();
                 this.renderSelections();
                 this.renderGroundMapping();
             });
@@ -243,7 +253,13 @@ export default class TileEditorPanel {
 
     renderSelections() {
         const selections = this.getSelections();
-        const entries = Object.entries(selections);
+        const entries = Object.entries(selections).sort(([a], [b]) => {
+            const aRequired = this.requiredSelections.includes(a);
+            const bRequired = this.requiredSelections.includes(b);
+            if (aRequired && !bRequired) return -1;
+            if (!aRequired && bRequired) return 1;
+            return a.localeCompare(b);
+        });
         this.listEl.innerHTML = '';
         if (!entries.length) {
             const empty = document.createElement('div');
@@ -256,6 +272,7 @@ export default class TileEditorPanel {
         entries.forEach(([name, selection]) => {
             const item = document.createElement('div');
             item.className = 'tile-editor__item' + (name === this.selectedName ? ' is-selected' : '');
+            const isRequired = this.requiredSelections.includes(name);
             const preview = document.createElement('canvas');
             preview.className = 'tile-editor__preview';
             preview.width = 32;
@@ -266,28 +283,33 @@ export default class TileEditorPanel {
             label.textContent = name;
             const meta = document.createElement('div');
             meta.className = 'tile-editor__meta';
-            meta.textContent = typeof selection.frame === 'number' ? `frame ${selection.frame}` : 'unassigned';
-
-            const deleteBtn = document.createElement('button');
-            deleteBtn.type = 'button';
-            deleteBtn.className = 'tile-editor__button';
-            deleteBtn.textContent = 'Remove';
-            deleteBtn.addEventListener('click', (event) => {
-                event.stopPropagation();
-                deleteTileSelection(this.data, this.activeTileset.key, name);
-                this.persistSelections();
-                if (this.selectedName === name) this.selectedName = null;
-                this.renderSelections();
-                this.renderGroundMapping();
-                this.drawTileset();
-            });
+            if (typeof selection.frame === 'number') {
+                meta.textContent = `frame ${selection.frame}${isRequired ? ' • required' : ''}`;
+            } else {
+                meta.textContent = `unassigned${isRequired ? ' • required' : ''}`;
+            }
 
             item.appendChild(preview);
             const textWrap = document.createElement('div');
             textWrap.appendChild(label);
             textWrap.appendChild(meta);
             item.appendChild(textWrap);
-            item.appendChild(deleteBtn);
+            if (!isRequired) {
+                const deleteBtn = document.createElement('button');
+                deleteBtn.type = 'button';
+                deleteBtn.className = 'tile-editor__button';
+                deleteBtn.textContent = 'Remove';
+                deleteBtn.addEventListener('click', (event) => {
+                    event.stopPropagation();
+                    deleteTileSelection(this.data, this.activeTileset.key, name);
+                    this.persistSelections();
+                    if (this.selectedName === name) this.selectedName = null;
+                    this.renderSelections();
+                    this.renderGroundMapping();
+                    this.drawTileset();
+                });
+                item.appendChild(deleteBtn);
+            }
             item.addEventListener('click', () => {
                 this.selectedName = name;
                 this.renderSelections();
@@ -325,6 +347,26 @@ export default class TileEditorPanel {
         const options = ['(none)', ...selections];
         this.populateSelect(this.groundTopEl, options, tilesetData.ground.top);
         this.populateSelect(this.groundFillEl, options, tilesetData.ground.fill);
+    }
+
+    ensureRequiredSelections() {
+        const tilesetData = ensureTileset(this.data, this.activeTileset.key);
+        let changed = false;
+        this.requiredSelections.forEach((name) => {
+            if (!tilesetData.selections[name]) {
+                tilesetData.selections[name] = { frame: null };
+                changed = true;
+            }
+        });
+        if (!tilesetData.ground.top && tilesetData.selections.ground_top) {
+            tilesetData.ground.top = 'ground_top';
+            changed = true;
+        }
+        if (!tilesetData.ground.fill && tilesetData.selections.ground_fill) {
+            tilesetData.ground.fill = 'ground_fill';
+            changed = true;
+        }
+        if (changed) this.persistSelections();
     }
 
     populateSelect(select, options, selectedValue) {

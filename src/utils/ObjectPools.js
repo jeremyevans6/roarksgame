@@ -198,9 +198,11 @@ export default class ObjectPools {
     getLevelGate(x, y, levelIndex) {
         const gate = this.takeFromPool(this.levelGatePool) || this.scene.levelGates.create(x, y, 'goal_pole');
         gate.setActive(true).setVisible(true);
+        gate.setOrigin(0.5, 1);
         gate.setPosition(x, y);
         gate.setScale(2);
         gate.setData('levelIndex', levelIndex);
+        gate.setDepth(2);
         if (gate.body) gate.body.enable = true;
         gate.refreshBody();
         return gate;
@@ -217,7 +219,8 @@ export default class ObjectPools {
         if (roll < 0.4) return this.getEnemy('mushroom', x, y);
         if (roll < 0.7) return this.getEnemy('frog', x, y);
         if (roll < 0.9) return this.getEnemy('turtle', x, y);
-        return this.getFlyingEnemy('bird', x, 180 + rng() * 120);
+        const flyY = Number.isFinite(y) ? y - 160 : 180 + rng() * 120;
+        return this.getFlyingEnemy('bird', x, flyY);
     }
 
     getBoss(x, y) {

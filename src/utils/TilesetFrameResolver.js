@@ -135,4 +135,11 @@ export default class TilesetFrameResolver {
         this.cache[tilesetKey] = resolved;
         return resolved;
     }
+
+    getNamedFrame(tilesetKey, selectionName) {
+        const stored = loadTileSelections();
+        const tilesetData = stored.tilesets ? stored.tilesets[tilesetKey] : null;
+        const frame = tilesetData?.selections?.[selectionName]?.frame;
+        return Number.isInteger(frame) ? frame : null;
+    }
 }

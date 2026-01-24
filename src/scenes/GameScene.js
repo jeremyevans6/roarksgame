@@ -4,7 +4,7 @@ import Enemy, { Mushroom, Frog, Turtle, Boss, FlyingEnemy } from '../entities/En
 import Collectible, { Powerup } from '../entities/Collectible';
 import WorldGenerator from '../utils/WorldGenerator';
 import WeatherSystem from '../utils/WeatherSystem';
-import { buildLevelConfig } from '../utils/LevelConfig';
+import { buildLevelConfig, getLevelIndexForX, getBiomeForLevel } from '../utils/LevelConfig';
 
 export default class GameScene extends Phaser.Scene {
     constructor() {
@@ -107,7 +107,7 @@ export default class GameScene extends Phaser.Scene {
         });
         this.worldGenerator = new WorldGenerator(this, this.levelConfig);
         this.worldWidth = this.worldGenerator.totalWidth;
-        this.biomeThresholds = this.levelConfig.biomeThresholds;
+        this.levelStride = this.levelConfig.levelStride;
         this.physics.world.setBounds(0, 0, this.worldWidth, this.levelConfig.levelHeight);
         this.physics.world.TILE_BIAS = 32;
         this.physics.world.OVERLAP_BIAS = 16;
@@ -171,6 +171,7 @@ export default class GameScene extends Phaser.Scene {
         this.timeSlowUntil = 0; this.timeSlowFactor = 0.6;
         this.coinCombo = 0; this.lastCoinAt = 0;
         this.weatherSystem = new WeatherSystem(this);
+        this.events.on('boss-defeated', (boss) => this.spawnBossRewards(boss));
         this.setupHUD();
         this.loadData();
     }
@@ -325,14 +326,12 @@ export default class GameScene extends Phaser.Scene {
 
     updateBiomeVisuals() {
         const x = this.player.x;
-        this.player.isSwimming = (x > this.biomeThresholds.aquatic);
+        const biome = getBiomeForLevel(getLevelIndexForX(x, this.levelConfig), this.levelConfig);
+        this.player.isSwimming = biome === 'aquatic';
         this.physics.world.gravity.y = this.player.isSwimming ? 300 : 1200;
-        
-        const isFungal = x > this.biomeThresholds.fungal && x <= this.biomeThresholds.aquatic;
-        const isAquatic = x > this.biomeThresholds.aquatic;
-        
-        const tint = this.platformTintEnabled ? (isAquatic ? 0x3498db : (isFungal ? 0x9b59b6 : 0xffffff)) : 0xffffff;
-        const bg = isAquatic ? 0x2c3e50 : (isFungal ? 0x4b0082 : 0x87ceeb);
+
+        const tint = this.platformTintEnabled ? (biome === 'aquatic' ? 0x3498db : (biome === 'fungal' ? 0x9b59b6 : 0xffffff)) : 0xffffff;
+        const bg = biome === 'aquatic' ? 0x2c3e50 : (biome === 'fungal' ? 0x4b0082 : 0x87ceeb);
         
         const chunk = Math.floor(x / 1000);
         if (chunk !== this.lastTintChunk) {
@@ -350,10 +349,7 @@ export default class GameScene extends Phaser.Scene {
     }
 
     getCurrentBiome() {
-        const x = this.player.x;
-        if (x > this.biomeThresholds.aquatic) return 'aquatic';
-        if (x > this.biomeThresholds.fungal) return 'fungal';
-        return 'meadows';
+        return getBiomeForLevel(getLevelIndexForX(this.player.x, this.levelConfig), this.levelConfig);
     }
 
     attack() {
@@ -752,6 +748,18 @@ export default class GameScene extends Phaser.Scene {
     }
     
     winGame() { if (this.isWinning) return; this.isWinning = true; this.saveData(); this.physics.pause(); this.add.text(400, 300, 'VICTORY!', { fontSize: '84px', fill: '#f1c40f' }).setOrigin(0.5).setScrollFactor(0); this.time.delayedCall(5000, () => { this.isWinning = false; this.scene.start('MenuScene'); }); }
+    spawnBossRewards(boss) {
+        const pools = this.worldGenerator?.pools;
+        if (!pools || !boss) return;
+        const baseX = boss.x;
+        const baseY = boss.y - 60;
+        for (let i = 0; i < 6; i++) {
+            const gem = pools.getGem(baseX + (i - 2.5) * 18, baseY - Math.abs(2 - i) * 10);
+            if (gem && gem.body) gem.body.setVelocity(0, -80);
+        }
+        const powerupKey = Math.random() > 0.5 ? 'powerup_fire' : 'feather';
+        pools.getPowerup(baseX, baseY - 40, powerupKey);
+    }
     completeLevel(player, gate) {
         const gateIndex = gate.getData('levelIndex');
         if (gateIndex === undefined || gateIndex === null) return;
