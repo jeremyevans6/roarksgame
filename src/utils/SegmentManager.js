@@ -14,8 +14,22 @@ export default class SegmentManager {
     }
 
     update(playerX) {
-        const currentIndex = Math.max(0, Math.min(this.config.levelCount - 1, Math.floor(playerX / this.config.levelStride)));
-        const desired = new Set([currentIndex - 1, currentIndex, currentIndex + 1].filter(i => i >= 0 && i < this.config.levelCount));
+        const camera = this.scene?.cameras?.main;
+        const worldView = camera?.worldView;
+        const stride = this.config.levelStride;
+        const maxIndex = this.config.levelCount - 1;
+        const currentIndex = Math.max(0, Math.min(maxIndex, Math.floor(playerX / stride)));
+        this.currentIndex = currentIndex;
+        const screenWidth = worldView?.width ?? 0;
+        const paddedLeft = (worldView?.left ?? playerX) - screenWidth * 2;
+        const paddedRight = (worldView?.right ?? playerX) + screenWidth * 2;
+        const startIndex = Math.max(0, Math.floor(paddedLeft / stride));
+        const endIndex = Math.min(maxIndex, Math.floor(paddedRight / stride));
+        const desired = new Set();
+
+        for (let index = startIndex; index <= endIndex; index++) {
+            desired.add(index);
+        }
 
         for (const index of desired) {
             if (!this.activeSegments.has(index)) {
@@ -28,6 +42,8 @@ export default class SegmentManager {
                 this.despawnSegment(index);
             }
         }
+
+        this.ensureGateForCurrent();
     }
 
     spawnSegment(index) {
@@ -366,13 +382,13 @@ export default class SegmentManager {
             if (boss) objects.enemies.push(boss);
         }
 
-        const gateX = nudgeOutOfPit(segmentStart + this.config.segmentLength - 60);
-        const gateY = groundSurfaceY;
-        const gate = this.pools.getLevelGate(gateX, gateY, index);
-        if (gate && this.resolvePlacement(gate, getBlockers(objects.platforms, objects.movingPlatforms, objects.breakables, objects.springs, objects.hazards, objects.enemies, objects.pickups, objects.checkpoints, objects.shops), 4, 10, 2)) {
-            objects.levelGates.push(gate);
-        } else if (gate) {
-            this.pools.releaseObject(gate, this.pools.levelGatePool);
+        if (index === this.currentIndex) {
+            this.spawnGateForSegment(index, {
+                objects,
+                groundSurfaceY,
+                getBlockers,
+                nudgeOutOfPit
+            });
         }
 
         if (rng() > 0.35) {

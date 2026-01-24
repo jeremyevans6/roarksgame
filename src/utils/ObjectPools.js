@@ -210,7 +210,8 @@ export default class ObjectPools {
 
     spawnEnemy(biome, x, y, rng) {
         if (biome === 'aquatic') {
-            return this.getFlyingEnemy('jellyfish', x, y);
+            const flyY = Number.isFinite(y) ? y - 160 : 220;
+            return this.getFlyingEnemy('jellyfish', x, flyY);
         }
         if (biome === 'fungal') {
             return rng() < 0.5 ? this.getEnemy('mushroom', x, y) : this.getEnemy('frog', x, y);
